@@ -1,0 +1,15 @@
+# ENGLISH WITH MEDEA - AGENT CONSTITUTION
+
+## Core Architecture
+- Pattern: Master-Mirror (Teacher = Source of Truth, Student = Reactive View).
+- Tech: Next.js 16 (Turbopack), Supabase Realtime, Tailwind.
+- Data Flow: Changes MUST go through Supabase `session_state` JSONB.
+
+## Critical Constraints
+- NEVER modify `src/lib/supabase/client.ts` without checking `.env.local`.
+- NEVER refactor `src/hooks/useSyncSession.ts` unless the Realtime connection is explicitly broken.
+- ALWAYS use the `FormattedLabel` component for bilingual text.
+
+## Persistence Protocol
+- Before any change, read `/docs/ACTIVE_CONTEXT.md` to understand the current task.
+- After every successful task, update `/docs/ACTIVE_CONTEXT.md` with the new state.
