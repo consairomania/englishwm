@@ -41,6 +41,7 @@ import {
   fetchSessionStudentId,
 } from '@/lib/seedSession';
 import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/roomCode';
+import { playSuccessSound } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import {
   getAllStudents,
@@ -2183,6 +2184,7 @@ export default function DashboardPage() {
   // ── XP & vocab ────────────────────────────────────────────────────────────────
   const addXp = useCallback((amount: number) => {
     setXpToast(amount);
+    playSuccessSound(amount);
     setStudent((prev) => {
       if (!prev) return prev;
       return {
