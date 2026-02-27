@@ -1443,7 +1443,7 @@ function VoyagerView({
                 <img
                   src={voyagerData.image_url}
                   alt="Generated scene"
-                  className={`w-full object-cover max-h-[400px] transition-opacity duration-700 ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
+                  className={`w-full object-contain max-h-[500px] transition-opacity duration-700 ${imageLoading ? 'opacity-0' : 'opacity-100'}`}
                   onLoad={() => setImageLoading(false)}
                   onError={() => { setImageLoading(false); setImageError(true); }}
                 />
