@@ -1918,9 +1918,40 @@ export default function DashboardPage() {
     };
   }, [student?.xp, student?.skills, isTeacher, sessionId, screen]);
 
-  // ── Elev: primește XP + skills prin Realtime și actualizează starea locală ───
+  // ── Elev: sync XP + skills în exercise_data → profesor vede prin Realtime ────
+  const studentProgressSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
-    if (isTeacher || screen !== 'app' || !liveState) return;
+    if (isTeacher || !student || !sessionId || screen !== 'app') return;
+    if (studentProgressSyncRef.current) clearTimeout(studentProgressSyncRef.current);
+    studentProgressSyncRef.current = setTimeout(async () => {
+      const { data: current } = await supabase
+        .from('session_state')
+        .select('exercise_data')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+      const existing =
+        typeof current?.exercise_data === 'object' && current.exercise_data !== null
+          ? (current.exercise_data as Record<string, unknown>)
+          : {};
+      await supabase
+        .from('session_state')
+        .update({
+          exercise_data: {
+            ...existing,
+            student_xp: student.xp,
+            student_skills: student.skills,
+          },
+        })
+        .eq('session_id', sessionId);
+    }, 300);
+    return () => {
+      if (studentProgressSyncRef.current) clearTimeout(studentProgressSyncRef.current);
+    };
+  }, [student?.xp, student?.skills, isTeacher, sessionId, screen]);
+
+  // ── Elev + Profesor: primește XP + skills prin Realtime și actualizează starea locală ───
+  useEffect(() => {
+    if (screen !== 'app' || !liveState) return;
     const ed = liveState.exercise_data as Record<string, unknown> | null;
     if (!ed) return;
     const liveXp = ed.student_xp;
