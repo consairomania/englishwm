@@ -48,15 +48,16 @@ export async function deleteStudent(id: string): Promise<boolean> {
   return true;
 }
 
-// ─── Actualizează numele și nivelul elevului ──────────────────────────────────
+// ─── Actualizează numele, nivelul și segmentul de vârstă al elevului ──────────
 export async function updateStudentDetails(
   id: string,
   name: string,
-  level: string
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult'
 ): Promise<boolean> {
   const { error } = await supabase
     .from('students')
-    .update({ name: name.trim(), level })
+    .update({ name: name.trim(), level, age_segment: ageSegment })
     .eq('id', id);
   if (error) {
     console.warn('[students] updateStudentDetails error:', error.message);
@@ -105,6 +106,7 @@ function normalizeStudent(raw: Record<string, unknown>): Student {
     id: raw.id as string,
     name: raw.name as string,
     level: (raw.level as string) ?? 'B1',
+    age_segment: (raw.age_segment as 'child' | 'teenager' | 'adult') ?? 'adult',
     xp: (raw.xp as number) ?? 0,
     skills: {
       speaking: (rawSkills?.speaking as number) ?? 20,

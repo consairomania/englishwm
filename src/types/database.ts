@@ -23,6 +23,7 @@ export type Student = {
   id: string;
   name: string;
   level: string;
+  age_segment: 'child' | 'teenager' | 'adult';
   xp: number;
   skills: { speaking: number; grammar: number; vocabulary: number };
   created_at: string;

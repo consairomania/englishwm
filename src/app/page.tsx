@@ -139,6 +139,7 @@ type Student = {
   dbId: string;
   name: string;
   level: string;
+  age_segment: 'child' | 'teenager' | 'adult';
   xp: number;
   nextLevelXp: number;
   skills: { speaking: number; grammar: number; vocabulary: number };
@@ -153,6 +154,7 @@ function dbStudentToLocal(s: DBStudent): Student {
     dbId: s.id,
     name: s.name,
     level: s.level,
+    age_segment: s.age_segment ?? 'adult',
     xp: s.xp,
     nextLevelXp: 1000,
     skills: s.skills,
@@ -301,6 +303,7 @@ function TeacherHome({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editLevel, setEditLevel] = useState('');
+  const [editAgeSegment, setEditAgeSegment] = useState<'child' | 'teenager' | 'adult'>('adult');
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -338,21 +341,23 @@ function TeacherHome({
     setEditingId(s.id);
     setEditName(s.name);
     setEditLevel(s.level);
+    setEditAgeSegment(s.age_segment ?? 'adult');
   };
 
   const handleCancelEdit = () => {
     setEditingId(null);
     setEditName('');
     setEditLevel('');
+    setEditAgeSegment('adult');
   };
 
   const handleSaveEdit = async () => {
     if (!editName.trim() || !editingId) return;
     setSaving(true);
-    const ok = await updateStudentDetails(editingId, editName, editLevel);
+    const ok = await updateStudentDetails(editingId, editName, editLevel, editAgeSegment);
     if (ok) {
       setStudents((prev) =>
-        prev.map((s) => s.id === editingId ? { ...s, name: editName.trim(), level: editLevel } : s)
+        prev.map((s) => s.id === editingId ? { ...s, name: editName.trim(), level: editLevel, age_segment: editAgeSegment } : s)
       );
       setEditingId(null);
     }
@@ -488,6 +493,21 @@ function TeacherHome({
                         </button>
                       ))}
                     </div>
+                    <div className="flex gap-1">
+                      {([['child', 'Copil (6-11)'], ['teenager', 'Adolescent (12-17)'], ['adult', 'Adult (18+)']] as const).map(([seg, label]) => (
+                        <button
+                          key={seg}
+                          onClick={() => setEditAgeSegment(seg)}
+                          className={`flex-1 px-2 py-1 rounded-lg font-black text-[10px] border transition-all ${
+                            editAgeSegment === seg
+                              ? 'bg-violet-600 text-white border-violet-600'
+                              : 'bg-white text-slate-400 border-slate-200 hover:border-violet-300'
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
                     <div className="flex gap-2">
                       <button
                         onClick={handleSaveEdit}
@@ -509,7 +529,7 @@ function TeacherHome({
                     <div className="flex-1 min-w-0">
                       <p className="font-black text-slate-800 text-sm truncate">{s.name}</p>
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
-                        {s.level} · {s.xp} XP · Speaking {s.skills.speaking}% · Grammar {s.skills.grammar}%
+                        {s.level} · {s.age_segment === 'child' ? 'Copil' : s.age_segment === 'teenager' ? 'Adolescent' : 'Adult'} · {s.xp} XP · Speaking {s.skills.speaking}% · Grammar {s.skills.grammar}%
                       </p>
                     </div>
                     <div className="flex gap-1.5 shrink-0">
@@ -1018,7 +1038,7 @@ function PuzzleView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generatePuzzleContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generatePuzzleContent(sessionId, topic.trim(), student.level, student.age_segment);
       onPuzzleGenerated(data);
       setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
@@ -1409,7 +1429,7 @@ function VoyagerView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generateVoyagerContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generateVoyagerContent(sessionId, topic.trim(), student.level, student.age_segment);
       onVoyagerGenerated(data);
       setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
@@ -1650,7 +1670,7 @@ function ArenaView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generateQuestContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generateQuestContent(sessionId, topic.trim(), student.level, student.age_segment);
       onQuestGenerated(data);
       setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
@@ -2669,6 +2689,7 @@ export default function DashboardPage() {
         {currentView === 'tense_arena' && (
           <TimeTravelView
             studentLevel={student.level}
+            ageSegment={student.age_segment ?? 'adult'}
             sessionId={sessionId}
             timeTravelData={timeTravelData}
             isTeacher={isTeacher}

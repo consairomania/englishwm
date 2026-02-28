@@ -6,6 +6,17 @@ import type { PuzzleData, VoyagerData, QuestData, TimeTravelData } from '@/types
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
+function getAgeInstruction(ageSegment: 'child' | 'teenager' | 'adult'): string {
+  switch (ageSegment) {
+    case 'child':
+      return 'The student is a child (6-11 years old). Use simple vocabulary and short sentences. When choosing a random topic, pick ONE from this curated list: Animals & Wildlife, Dinosaurs & Prehistoric Life, Superheroes & Powers, Fairy Tales & Magic, School Adventures, Sports & Games, Nature & Plants, Space & Planets, Cooking & Food, The Seasons & Weather, Pets & Animal Care, Friendship & Kindness, Family Life, The Ocean & Sea Creatures, Bugs & Insects, Holidays & Celebrations, The Jungle & Safari, A Day at the Zoo, Circus & Performers, Toys & Inventions. Avoid adult themes, violence, or romance.';
+    case 'teenager':
+      return 'The student is a teenager (12-17 years old). Use engaging, modern language. When choosing a random topic, pick ONE from this curated list: Social Media & Online Life, Music & Concerts, Sports & Competitions, Gaming & Esports, Fashion & Personal Style, School & Exams, Travel & Adventure, Environmental Issues, Technology & Apps, Movies & TV Series, Volunteering & Community, Part-time Jobs, Learning New Skills, Street Food & Restaurants, Friendships & Social Life, Mental Health & Wellbeing, Future Careers, Hobbies & Passions, Science Discoveries, Cultural Exchange. Keep content age-appropriate.';
+    case 'adult':
+      return 'The student is an adult (18+ years old). Use sophisticated, mature vocabulary. When choosing a random topic, pick ONE from this curated list: Work-Life Balance, Artificial Intelligence at Work, Remote vs. Office Work, Leadership and Management, Entrepreneurship, Stress Management, Healthy Habits, Emotional Intelligence, Lifelong Learning, Minimalism as a Lifestyle, Sustainable Tourism, The Impact of Social Media, Financial Literacy, Cultural Differences, The Future of Cities, Gastronomy as a Cultural Experience, The Evolution of Cinema, Hobbies in Adulthood, The Power of Volunteering, Climate Change, Friendship in Adulthood, Quality vs. Quantity, Childhood Friendships, The Influence of Social Circle, Dating in the Digital Age, Dynamics of the Modern Family, Long-Distance Relationships, Balance in a Relationship, The Art of Active Listening, Managing Conflicts, Body Language, Setting Boundaries, Authentic Networking, Mentoring, Social Intelligence at Work.';
+  }
+}
+
 function getGenAI() {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) throw new Error('GEMINI_API_KEY not configured');
@@ -37,7 +48,8 @@ async function mergeExerciseData(
 export async function generatePuzzleContent(
   sessionId: string,
   topic: string,
-  level: string
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
 ): Promise<{ data: PuzzleData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -45,9 +57,10 @@ export async function generatePuzzleContent(
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Teacher creating sentence scramble puzzles.
 The student's level is ${level} (CEFR: A1–C2). Adjust complexity accordingly.
+${getAgeInstruction(ageSegment)}
 
 ${isRandom
-  ? 'Choose a creative and varied topic for this puzzle (everyday situations, travel, food, school, sports, nature, technology, hobbies, etc.). Be surprising and diverse.'
+  ? 'Pick ONE topic from the curated age-appropriate list above. Be creative in how you build the sentence from it.'
   : `TASK: Create ONE coherent English sentence about: "${topic}".`
 }
 
@@ -132,7 +145,8 @@ export async function setPuzzleShowTranslation(sessionId: string, show: boolean)
 export async function generateVoyagerContent(
   sessionId: string,
   topic: string,
-  level: string
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
 ): Promise<{ data: VoyagerData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -140,8 +154,9 @@ export async function generateVoyagerContent(
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are a Creative English Teacher creating visual storytelling lessons.
 Student level: ${level} (CEFR).
+${getAgeInstruction(ageSegment)}
 ${isRandom
-  ? 'Choose a creative and surprising scene topic for this lesson (exotic markets, space stations, medieval villages, underwater worlds, jungle temples, futuristic cities, etc.). Be varied and imaginative.'
+  ? 'Pick ONE topic from the curated age-appropriate list above and imagine a vivid, concrete scene that brings it to life visually.'
   : `Topic: "${topic}".`
 }
 
@@ -278,7 +293,8 @@ export async function clearVoyagerContent(sessionId: string): Promise<void> {
 export async function generateQuestContent(
   sessionId: string,
   topic: string,
-  level: string
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
 ): Promise<{ data: QuestData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -286,8 +302,9 @@ export async function generateQuestContent(
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Coach creating immersive roleplay quests.
 Student level: ${level} (CEFR).
+${getAgeInstruction(ageSegment)}
 ${isRandom
-  ? 'Choose a creative and varied roleplay context for this quest (airport check-in, job interview, restaurant order, doctor visit, lost in a city, negotiating a deal, etc.). Be diverse and surprising.'
+  ? 'Pick ONE topic from the curated age-appropriate list above and build a roleplay scenario around it.'
   : `Context/topic: "${topic}".`
 }
 
@@ -340,7 +357,8 @@ export async function generateTimeTravelContent(
   sessionId: string,
   level: string,
   topic?: string,
-  tenses?: string[]
+  tenses?: string[],
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
 ): Promise<{ data: TimeTravelData; chosenTopic: string }> {
   const genAI = getGenAI();
 
@@ -351,11 +369,12 @@ export async function generateTimeTravelContent(
 
   const topicConstraint = topic
     ? `All sentences must relate to this topic or scenario: "${topic}".`
-    : 'Choose an interesting, creative everyday topic for all sentences and report it in "chosen_topic".';
+    : 'Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".';
 
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Grammar Teacher creating verb tense exercises for CEFR level ${level}.
+${getAgeInstruction(ageSegment)}
 
 Generate exactly 15 sentence exercises and return a JSON object with this structure:
 {

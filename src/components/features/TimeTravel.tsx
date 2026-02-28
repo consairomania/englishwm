@@ -53,6 +53,7 @@ export type StudentTimeTravelAnswers = {
 
 type TimeTravelViewProps = {
   studentLevel: string;
+  ageSegment?: 'child' | 'teenager' | 'adult';
   sessionId: string;
   timeTravelData: TimeTravelData | null;
   isTeacher: boolean;
@@ -64,6 +65,7 @@ type TimeTravelViewProps = {
 
 export function TimeTravelView({
   studentLevel,
+  ageSegment = 'adult',
   sessionId,
   timeTravelData,
   isTeacher,
@@ -196,7 +198,8 @@ export function TimeTravelView({
         sessionId,
         studentLevel,
         topic.trim() || undefined,
-        tensesToPass
+        tensesToPass,
+        ageSegment
       );
       if (wasRandom) setTopic(chosenTopic);
     } catch (e) {
