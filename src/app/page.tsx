@@ -2012,7 +2012,12 @@ export default function DashboardPage() {
     if (!isTeacher || screen !== 'app' || !liveState) return;
     const ev = (liveState.exercise_data as Record<string, unknown>)?.xp_event as
       { amount: number; ts: number } | null | undefined;
-    if (ev && ev.ts !== lastXpEventTsRef.current) {
+    if (!ev) return;
+    if (lastXpEventTsRef.current === 0) {
+      lastXpEventTsRef.current = ev.ts;
+      return; // nu afișa toast pentru starea existentă la încărcare
+    }
+    if (ev.ts !== lastXpEventTsRef.current) {
       lastXpEventTsRef.current = ev.ts;
       setXpToast(ev.amount);
       playSuccessSound(ev.amount);
