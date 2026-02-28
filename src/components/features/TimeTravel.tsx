@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User } from 'lucide-react';
+import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown } from 'lucide-react';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import { generateTimeTravelContent, clearTimeTravelContent } from '@/app/actions/gemini';
 import { playWrongSound } from '@/lib/sound';
@@ -25,6 +25,8 @@ const ENGLISH_TENSES = [
   'Second Conditional',
   'Third Conditional',
 ] as const;
+
+type EnglishTense = typeof ENGLISH_TENSES[number];
 
 const WRONG_FLASH_MS = 1500;
 const N = 15; // numărul de exerciții generat
@@ -62,29 +64,41 @@ export function TimeTravelView({
   const [wrongEventTs, setWrongEventTs] = useState<number | null>(null);
 
   // ── Refs sincrone pentru gardă anti-dublu-click ───────────────────────────────
-  // Starea React este asincronă: un al doilea click rapid poate trece garda înainte
-  // de re-render. Refs sunt citite sincron → previn race condition.
   const lockedRef = useRef<(number | null)[]>(Array(N).fill(null));
   const flashRef = useRef<(number | null)[]>(Array(N).fill(null));
   const xpAwardedRef = useRef<boolean[]>(Array(N).fill(false));
 
   // ── Stare generare (profesorul) ───────────────────────────────────────────────
   const [topic, setTopic] = useState('');
-  const [tense, setTense] = useState('');
+  // selectedTenses: [] = Automix (nicio restricție); altfel = tense-urile alese
+  const [selectedTenses, setSelectedTenses] = useState<EnglishTense[]>([]);
+  const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
+
+  // Ref pentru click-outside pe dropdown
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Debounce ref pentru sync la DB
   const syncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ── Click-outside închide dropdown-ul ────────────────────────────────────────
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsDropdownOpen(false);
+      }
+    };
+    if (isDropdownOpen) {
+      document.addEventListener('mousedown', handleClickOutside);
+    }
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [isDropdownOpen]);
+
   // Resetare completă când profesorul trimite exerciții NOI.
-  // IMPORTANT: nu folosim [timeTravelData] ca dep — e obiect nou la fiecare Realtime update
-  // (chiar dacă conținutul e identic), ceea ce ar reseta starea elevului după fiecare sync.
-  // Folosim un string-key derivat din prima propoziție: egal prin valoare, nu prin referință.
   const timeTravelKey = timeTravelData?.[0]?.sentence_en ?? null;
   useEffect(() => {
     if (timeTravelKey && studentAnswers?.timeTravelKey === timeTravelKey) {
-      // Același exercițiu, pagina a fost reîncărcată → restaurează răspunsurile salvate
       const restored = studentAnswers.lockedAnswers;
       lockedRef.current = [...restored];
       xpAwardedRef.current = restored.map((v) => v !== null);
@@ -93,7 +107,6 @@ export function TimeTravelView({
       setFlashWrong(Array(N).fill(null));
       setWrongEventTs(null);
     } else {
-      // Exercițiu nou sau prima încărcare fără răspunsuri salvate → reset complet
       lockedRef.current = Array(N).fill(null);
       flashRef.current = Array(N).fill(null);
       xpAwardedRef.current = Array(N).fill(false);
@@ -134,23 +147,19 @@ export function TimeTravelView({
   // ── Selecție elev ─────────────────────────────────────────────────────────────
   const handleSelect = (sentenceIdx: number, optionIdx: number) => {
     if (!timeTravelData) return;
-    // Garda sincronă via refs — imună la race condition de dublu-click rapid
-    if (lockedRef.current[sentenceIdx] !== null) return;   // deja rezolvată
-    if (flashRef.current[sentenceIdx] !== null) return;    // în curs de flash
+    if (lockedRef.current[sentenceIdx] !== null) return;
+    if (flashRef.current[sentenceIdx] !== null) return;
 
     const item = timeTravelData[sentenceIdx];
 
     if (optionIdx === item.correct_index) {
-      // Marchează SINCRON ca rezolvat înainte de orice re-render
       lockedRef.current = lockedRef.current.map((v, i) => (i === sentenceIdx ? optionIdx : v));
-      // XP acordat o singură dată per propoziție (ref sincron)
       if (!xpAwardedRef.current[sentenceIdx]) {
         xpAwardedRef.current[sentenceIdx] = true;
         addXp(50);
       }
       setLockedAnswers((prev) => prev.map((v, i) => (i === sentenceIdx ? optionIdx : v)));
     } else {
-      // Marchează SINCRON ca „în flash" înainte de orice re-render
       flashRef.current = flashRef.current.map((v, i) => (i === sentenceIdx ? optionIdx : v));
       setFlashWrong((prev) => prev.map((v, i) => (i === sentenceIdx ? optionIdx : v)));
       setWrongEventTs(Date.now());
@@ -165,15 +174,18 @@ export function TimeTravelView({
   // ── Generare (profesor) ───────────────────────────────────────────────────────
   const handleGenerate = async () => {
     if (isGenerating) return;
+    const wasRandom = !topic.trim();
     setIsGenerating(true);
     setGenError('');
     try {
-      await generateTimeTravelContent(
+      const tensesToPass = selectedTenses.length > 0 ? selectedTenses : undefined;
+      const { chosenTopic } = await generateTimeTravelContent(
         sessionId,
         studentLevel,
         topic.trim() || undefined,
-        tense || undefined
+        tensesToPass
       );
+      if (wasRandom) setTopic(chosenTopic);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     } finally {
@@ -185,8 +197,22 @@ export function TimeTravelView({
     await clearTimeTravelContent(sessionId);
   };
 
+  // ── Toggle tense în selecție ──────────────────────────────────────────────────
+  const toggleTense = (t: EnglishTense) => {
+    setSelectedTenses((prev) =>
+      prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]
+    );
+  };
+
+  // ── Etichetă dropdown ─────────────────────────────────────────────────────────
+  const dropdownLabel =
+    selectedTenses.length === 0
+      ? 'Automix'
+      : selectedTenses.length === ENGLISH_TENSES.length
+        ? 'Toate timpurile'
+        : `${selectedTenses.length} timp${selectedTenses.length !== 1 ? 'uri' : ''}`;
+
   // ── Stare de afișare ──────────────────────────────────────────────────────────
-  // Profesorul vede starea elevului (din DB via Realtime); elevul vede starea lui locală
   const displayLocked: (number | null)[] = isTeacher
     ? (studentAnswers?.lockedAnswers ?? Array(N).fill(null))
     : lockedAnswers;
@@ -196,6 +222,8 @@ export function TimeTravelView({
 
   const studentHasAnswered =
     displayLocked.some((v) => v !== null) || displayFlash.some((v) => v !== null);
+
+  const isRandom = !topic.trim();
 
   // ── Render ────────────────────────────────────────────────────────────────────
   return (
@@ -223,32 +251,76 @@ export function TimeTravelView({
             <Sparkles size={11} className="text-indigo-500" /> Generează exerciții
           </p>
           <div className="flex flex-col sm:flex-row gap-2">
+            {/* Input topic */}
             <input
               className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-indigo-400 transition-all font-bold text-slate-700 text-sm placeholder:font-medium placeholder:text-slate-300"
-              placeholder="Subiect / scenariu... (ex: At the airport)"
+              placeholder="Subiect / scenariu... (lasă gol pentru random)"
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
               disabled={isGenerating}
             />
-            <select
-              className="sm:w-56 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-indigo-400 transition-all font-bold text-slate-700 text-sm cursor-pointer"
-              value={tense}
-              onChange={(e) => { setTense(e.target.value); setGenError(''); }}
-              disabled={isGenerating}
-            >
-              <option value="">Auto (mix timpuri)</option>
-              {ENGLISH_TENSES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
+
+            {/* Dropdown multi-select tense */}
+            <div className="relative sm:w-56" ref={dropdownRef}>
+              <button
+                type="button"
+                onClick={() => setIsDropdownOpen((v) => !v)}
+                disabled={isGenerating}
+                className="w-full flex items-center justify-between px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-indigo-400 transition-all font-bold text-slate-700 text-sm cursor-pointer disabled:opacity-40"
+              >
+                <span>{dropdownLabel}</span>
+                <ChevronDown
+                  size={14}
+                  className={`text-slate-400 transition-transform duration-200 ${isDropdownOpen ? 'rotate-180' : ''}`}
+                />
+              </button>
+
+              {isDropdownOpen && (
+                <div className="absolute top-full mt-1 left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
+                  <div className="max-h-64 overflow-y-auto p-2 space-y-0.5">
+                    {/* Automix option */}
+                    <label className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={selectedTenses.length === 0}
+                        onChange={() => setSelectedTenses([])}
+                        className="accent-indigo-600 w-3.5 h-3.5"
+                      />
+                      <span className="text-sm font-black text-slate-700">Automix</span>
+                    </label>
+                    <div className="h-px bg-slate-100 mx-2 my-1" />
+                    {/* Tense-uri individuale */}
+                    {ENGLISH_TENSES.map((t) => (
+                      <label key={t} className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={selectedTenses.includes(t)}
+                          onChange={() => toggleTense(t)}
+                          className="accent-indigo-600 w-3.5 h-3.5"
+                        />
+                        <span className="text-sm font-medium text-slate-600">{t}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Buton generare */}
             <button
               onClick={handleGenerate}
               disabled={isGenerating}
               className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shrink-0"
             >
-              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <RefreshCw size={15} />}
-              {isGenerating ? 'Generez...' : timeTravelData ? 'Re-generează' : 'Generează'}
+              {isGenerating ? (
+                <Loader2 className="animate-spin" size={16} />
+              ) : isRandom ? (
+                <Shuffle size={15} />
+              ) : (
+                <RefreshCw size={15} />
+              )}
+              {isGenerating ? 'Generez...' : isRandom ? 'Random' : timeTravelData ? 'Re-generează' : 'Generează'}
             </button>
           </div>
           {genError && (
@@ -311,7 +383,6 @@ export function TimeTravelView({
             const flashIdx = displayFlash[sentenceIdx];
             const isFlashing = flashIdx !== null;
 
-            // Propoziția cu blank completat (doar când e rezolvată)
             const displaySentenceEn = isSolved
               ? item.sentence_en.replace('___', item.options[displayLocked[sentenceIdx]!])
               : item.sentence_en;
@@ -321,7 +392,6 @@ export function TimeTravelView({
                 key={sentenceIdx}
                 className="bg-white p-5 rounded-[24px] shadow-lg border border-slate-50 space-y-4"
               >
-                {/* Număr propoziție + iconiță rezultat */}
                 <div className="flex items-center gap-2">
                   <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md">
                     {String(sentenceIdx + 1).padStart(2, '0')}
@@ -330,14 +400,12 @@ export function TimeTravelView({
                   {isFlashing && <XCircle size={14} className="text-rose-500 ml-auto" />}
                 </div>
 
-                {/* Propoziție bilingvă */}
                 <FormattedLabel
                   level={studentLevel}
                   en={displaySentenceEn}
                   ro={item.sentence_ro}
                 />
 
-                {/* Opțiuni 2×2 */}
                 <div className="grid grid-cols-2 gap-2">
                   {item.options.map((option, optionIdx) => {
                     let btnClass = 'p-3 rounded-xl border text-sm font-black text-left transition-all ';
@@ -355,10 +423,8 @@ export function TimeTravelView({
                         btnClass += 'bg-slate-50 border-slate-100 text-slate-400 cursor-not-allowed opacity-50';
                       }
                     } else if (isTeacher) {
-                      // Profesor: vizual-only, fără interacțiune
                       btnClass += 'bg-slate-50 border-slate-100 text-slate-500 cursor-default';
                     } else {
-                      // Elev: interactiv
                       btnClass +=
                         'bg-slate-50 border-slate-100 hover:border-indigo-300 hover:bg-indigo-50 hover:text-indigo-700 active:scale-[0.98] cursor-pointer';
                     }

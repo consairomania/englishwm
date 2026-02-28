@@ -340,35 +340,38 @@ export async function generateTimeTravelContent(
   sessionId: string,
   level: string,
   topic?: string,
-  tense?: string
-): Promise<TimeTravelData> {
+  tenses?: string[]
+): Promise<{ data: TimeTravelData; chosenTopic: string }> {
   const genAI = getGenAI();
 
-  const tenseConstraint = tense
-    ? `All 3 exercises MUST use the ${tense} tense exclusively.`
-    : 'Vary the tenses across the 3 exercises (e.g. Past Simple, Present Perfect, Future Simple, Past Continuous, etc.).';
+  const hasTenseFilter = tenses && tenses.length > 0;
+  const tenseConstraint = hasTenseFilter
+    ? `Distribute the 15 exercises RANDOMLY across only these tenses: ${tenses!.join(', ')}.`
+    : 'Vary the tenses freely across all 15 exercises (use a wide mix of different tenses).';
 
   const topicConstraint = topic
     ? `All sentences must relate to this topic or scenario: "${topic}".`
-    : 'Choose varied, everyday topics for the sentences.';
+    : 'Choose an interesting, creative everyday topic for all sentences and report it in "chosen_topic".';
 
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Grammar Teacher creating verb tense exercises for CEFR level ${level}.
 
-Generate an array of exactly 15 sentence exercises.
-
-Return ONLY a valid JSON array (no markdown, no wrapping object), with exactly this structure per item:
-[
-  {
-    "sentence_en": "She ___ to Paris last year.",
-    "sentence_ro": "Ea a mers la Paris anul trecut.",
-    "options": ["go", "went", "has gone", "will go"],
-    "correct_index": 1
-  }
-]
+Generate exactly 15 sentence exercises and return a JSON object with this structure:
+{
+  "chosen_topic": "At the airport",
+  "exercises": [
+    {
+      "sentence_en": "She ___ to Paris last year.",
+      "sentence_ro": "Ea a mers la Paris anul trecut.",
+      "options": ["go", "went", "has gone", "will go"],
+      "correct_index": 1
+    }
+  ]
+}
 
 Rules:
+- chosen_topic: a short descriptive topic label (always include even when topic was given)
 - sentence_en: English sentence with exactly one blank ___ for the missing verb form
 - sentence_ro: Complete Romanian translation of the sentence (with the correct verb, NOT a blank)
 - options: exactly 4 forms of the SAME verb in different tenses/aspects
@@ -381,16 +384,18 @@ Rules:
 
   const prompt = [
     'Generate 15 verb tense exercises.',
-    tense ? `Tense: ${tense}.` : '',
+    hasTenseFilter ? `Tenses to use: ${tenses!.join(', ')}.` : '',
     topic ? `Topic: ${topic}.` : '',
   ].filter(Boolean).join(' ');
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  const data = JSON.parse(text) as TimeTravelData;
+  const raw = JSON.parse(text) as { chosen_topic?: string; exercises: TimeTravelData };
+  const data: TimeTravelData = raw.exercises;
+  const chosenTopic = raw.chosen_topic ?? topic ?? '';
 
   await mergeExerciseData(sessionId, { time_travel_data: data });
-  return data;
+  return { data, chosenTopic };
 }
 
 export async function clearTimeTravelContent(sessionId: string): Promise<void> {

@@ -68,7 +68,6 @@ import {
   deleteVoyagerImage,
   generateQuestContent,
   clearQuestContent,
-  generateTimeTravelContent,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 
@@ -2405,10 +2404,6 @@ export default function DashboardPage() {
       }]);
     }
     setIsSaving(false);
-    // Auto-generate Time Travel exercises when the teacher activates this view
-    if (newView === 'tense_arena' && student) {
-      generateTimeTravelContent(sessionId, student.level).catch(console.error);
-    }
   }, [sessionId, student]);
 
   // ── Ajustare nivel skill (profesor only) ─────────────────────────────────────
