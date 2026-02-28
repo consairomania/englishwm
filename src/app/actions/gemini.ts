@@ -372,7 +372,7 @@ Generate exactly 15 sentence exercises and return a JSON object with this struct
 
 Rules:
 - chosen_topic: a short descriptive topic label (always include even when topic was given)
-- sentence_en: English sentence with exactly one blank ___ for the missing verb form
+- sentence_en: Use one blank ___ for single-word verb forms (went, has gone). For compound forms (e.g. have + past participle), use TWO blanks in correct positions: "I ___ never ___ such a bird before." (correct answer: "have seen")
 - sentence_ro: Complete Romanian translation of the sentence (with the correct verb, NOT a blank)
 - options: exactly 4 forms of the SAME verb in different tenses/aspects
 - correct_index: integer 0–3 indicating the correct option

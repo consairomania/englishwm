@@ -31,6 +31,18 @@ type EnglishTense = typeof ENGLISH_TENSES[number];
 const WRONG_FLASH_MS = 1500;
 const N = 15; // numărul de exerciții generat
 
+function fillBlanks(sentence: string, option: string): string {
+  const blanks = (sentence.match(/___/g) || []).length;
+  const words = option.trim().split(/\s+/);
+  if (blanks <= 1) return sentence.replace('___', option);
+  let result = sentence;
+  for (let i = 0; i < blanks; i++) {
+    const word = i < words.length ? words[i] : (words[words.length - 1] ?? '');
+    result = result.replace('___', word);
+  }
+  return result;
+}
+
 export type StudentTimeTravelAnswers = {
   timeTravelKey?: string | null;
   lockedAnswers: (number | null)[];
@@ -384,7 +396,7 @@ export function TimeTravelView({
             const isFlashing = flashIdx !== null;
 
             const displaySentenceEn = isSolved
-              ? item.sentence_en.replace('___', item.options[displayLocked[sentenceIdx]!])
+              ? fillBlanks(item.sentence_en, item.options[displayLocked[sentenceIdx]!])
               : item.sentence_en;
 
             return (
