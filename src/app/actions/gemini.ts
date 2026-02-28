@@ -2,7 +2,7 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase/client';
-import type { PuzzleData, VoyagerData, QuestData } from '@/types/database';
+import type { PuzzleData, VoyagerData, QuestData, TimeTravelData } from '@/types/database';
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
@@ -252,4 +252,66 @@ Rules:
 
 export async function clearQuestContent(sessionId: string): Promise<void> {
   await mergeExerciseData(sessionId, { quest_data: null, student_quest_boosters: null });
+}
+
+// ─── Time Travel ───────────────────────────────────────────────────────────────
+export async function generateTimeTravelContent(
+  sessionId: string,
+  level: string,
+  topic?: string,
+  tense?: string
+): Promise<TimeTravelData> {
+  const genAI = getGenAI();
+
+  const tenseConstraint = tense
+    ? `All 3 exercises MUST use the ${tense} tense exclusively.`
+    : 'Vary the tenses across the 3 exercises (e.g. Past Simple, Present Perfect, Future Simple, Past Continuous, etc.).';
+
+  const topicConstraint = topic
+    ? `All sentences must relate to this topic or scenario: "${topic}".`
+    : 'Choose varied, everyday topics for the sentences.';
+
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an Expert English Grammar Teacher creating verb tense exercises for CEFR level ${level}.
+
+Generate an array of exactly 15 sentence exercises.
+
+Return ONLY a valid JSON array (no markdown, no wrapping object), with exactly this structure per item:
+[
+  {
+    "sentence_en": "She ___ to Paris last year.",
+    "sentence_ro": "Ea a mers la Paris anul trecut.",
+    "options": ["go", "went", "has gone", "will go"],
+    "correct_index": 1
+  }
+]
+
+Rules:
+- sentence_en: English sentence with exactly one blank ___ for the missing verb form
+- sentence_ro: Complete Romanian translation of the sentence (with the correct verb, NOT a blank)
+- options: exactly 4 forms of the SAME verb in different tenses/aspects
+- correct_index: integer 0–3 indicating the correct option
+- ${tenseConstraint}
+- ${topicConstraint}
+- Level-appropriate vocabulary and sentence complexity for ${level}`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.85 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const prompt = [
+    'Generate 15 verb tense exercises.',
+    tense ? `Tense: ${tense}.` : '',
+    topic ? `Topic: ${topic}.` : '',
+  ].filter(Boolean).join(' ');
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const data = JSON.parse(text) as TimeTravelData;
+
+  await mergeExerciseData(sessionId, { time_travel_data: data });
+  return data;
+}
+
+export async function clearTimeTravelContent(sessionId: string): Promise<void> {
+  await mergeExerciseData(sessionId, { time_travel_data: null, student_time_travel_answers: null });
 }

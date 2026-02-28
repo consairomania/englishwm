@@ -1,6 +1,6 @@
 # ACTIVE_CONTEXT — English with Medéa App
 
-## Status: Implementat complet — Elevi Persistenți & Management
+## Status: Implementat complet — Modul Time Travel (Tense Arena)
 
 ---
 
@@ -30,8 +30,10 @@ Landing
 | `src/lib/seedSession.ts` | Seed sesiune, linkStudentToSession, fetchSessionStudentId |
 | `src/lib/roomCode.ts` | Mapare deterministă cod 4 cifre ↔ UUID sesiune |
 | `src/lib/studentService.ts` | CRUD elevi: getAllStudents, addStudent, deleteStudent, updateStudentProgress, getStudentById |
-| `src/types/database.ts` | Tipuri TypeScript: SessionState, Student, DebugError |
+| `src/types/database.ts` | Tipuri TypeScript: SessionState, Student, DebugError, TimeTravelData |
 | `src/components/FormattedLabel.tsx` | Component bilingv EN bold / RO italic |
+| `src/components/features/TimeTravel.tsx` | Modul Time Travel — exerciții de timp verbal |
+| `src/app/actions/gemini.ts` | Server Actions AI: Puzzle, Voyager, Quest, Time Travel |
 | `docs/supabase_rls_fix.sql` | Politici RLS pentru sessions + session_state |
 | `docs/supabase_students_setup.sql` | CREATE TABLE students + politici RLS |
 
@@ -82,6 +84,16 @@ CREATE POLICY "anon delete students" ON public.students FOR DELETE TO anon USING
 - Elevul intră cu codul → `fetchSessionStudentId` → `getStudentById` → profil încărcat automat
 - `useSyncSession`: Realtime Postgres Changes pe `session_state`
 - Profesorul controlează `current_view` (dashboard/voyager/puzzle/arena) → elevii văd live
+
+### Time Travel (Tense Arena)
+- View ID: `tense_arena` în `SessionState.current_view`
+- Profesor apasă butonul "TIME" din control panel → `changeView('tense_arena')` → auto-generare AI
+- Gemini generează array de 3 obiecte `TimeTravelItem` (sentence_en cu ___, sentence_ro, options[4], correct_index)
+- Rezultatul se salvează în `exercise_data.time_travel_data` via `mergeExerciseData`
+- Elevul vede exercițiile via Realtime; alege dintr-un grid 2×2 de butoane
+- Feedback instant: verde (corect) / roșu (greșit), blocat după selecție
+- +50 XP per răspuns corect (acordat o singură dată per propoziție)
+- Profesorul poate re-genera sau șterge din `TimeTravelView`
 
 ### Progres persistent
 - XP și skills salvate în `students.xp` și `students.skills` (JSONB)

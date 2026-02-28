@@ -31,6 +31,7 @@ import {
   Pencil,
   Check,
   X,
+  Clock,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -41,8 +42,9 @@ import {
   fetchSessionStudentId,
 } from '@/lib/seedSession';
 import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/roomCode';
-import { playSuccessSound } from '@/lib/sound';
+import { playSuccessSound, playWrongSound } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
+import { TimeTravelView, StudentTimeTravelAnswers } from '@/components/features/TimeTravel';
 import {
   getAllStudents,
   addStudent as dbAddStudent,
@@ -51,7 +53,7 @@ import {
   updateStudentDetails,
   getStudentById,
 } from '@/lib/studentService';
-import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData } from '@/types/database';
+import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData } from '@/types/database';
 import {
   generatePuzzleContent,
   clearPuzzleContent,
@@ -60,6 +62,7 @@ import {
   deleteVoyagerImage,
   generateQuestContent,
   clearQuestContent,
+  generateTimeTravelContent,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 
@@ -753,9 +756,10 @@ function SessionClosedOverlay() {
 // ─── XP Toast ─────────────────────────────────────────────────────────────────
 function XpToast({ amount, onDone }: { amount: number; onDone: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onDone, 1800);
+    const t = setTimeout(onDone, 2000);
     return () => clearTimeout(t);
-  }, [onDone]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // deps gol — timer pornește o singură dată la mount, re-render-urile nu îl mai resetează
   return (
     <div className="fixed top-20 right-4 z-100 bg-yellow-400 text-yellow-900 px-4 py-2 rounded-2xl font-black text-sm shadow-xl flex items-center gap-2 animate-bounce">
       <Zap size={16} /> +{amount} XP
@@ -788,6 +792,7 @@ function DashboardView({
     { id: 'voyager' as const, icon: ImageIcon, color: 'text-pink-600', bg: 'bg-pink-50', label: 'Imagine', desc: 'Visual Voyager', xp: 50 },
     { id: 'arena' as const, icon: Sword, color: 'text-emerald-600', bg: 'bg-emerald-50', label: 'Quests', desc: 'Story Arena', xp: 300 },
     { id: 'puzzle' as const, icon: PuzzleIcon, color: 'text-purple-600', bg: 'bg-purple-50', label: 'Puzzle', desc: 'Sentence Builder', xp: 200 },
+    { id: 'tense_arena' as const, icon: Clock, color: 'text-indigo-600', bg: 'bg-indigo-50', label: 'Time Travel', desc: 'Tense Arena', xp: 150 },
   ];
 
   return (
@@ -864,7 +869,7 @@ function DashboardView({
           </div>
         </div>
       </div>
-      <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
         {activities.map((action) => (
           <div
             key={action.id}
@@ -1764,6 +1769,7 @@ function TeacherControlPanel({
     { id: 'voyager' as const, label: 'IMAGE', icon: ImageIcon },
     { id: 'puzzle' as const, label: 'PUZZLE', icon: PuzzleIcon },
     { id: 'arena' as const, label: 'QUEST', icon: Sword },
+    { id: 'tense_arena' as const, label: 'TIME', icon: Clock },
   ];
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-[28px] px-5 py-3 shadow-2xl flex items-center gap-5 z-50">
@@ -1855,6 +1861,7 @@ export default function DashboardPage() {
   const [selectedDBStudent, setSelectedDBStudent] = useState<DBStudent | null>(null);
   const [profileError, setProfileError] = useState('');
   const [sessionClosedVisible, setSessionClosedVisible] = useState(false);
+  const sessionClosedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [studentLocalView, setStudentLocalView] = useState<SessionState['current_view'] | null>(null);
 
   const { state: liveState } = useSyncSession(sessionId);
@@ -1878,6 +1885,11 @@ export default function DashboardPage() {
     setSessionClosedVisible(false);
   }, []);
 
+  // Ref pentru oglindirea badge-ului XP pe ecranul profesorului
+  const lastXpEventTsRef = useRef<number>(0);
+  // Ref pentru deduplicarea sunetului de răspuns greșit pe ecranul profesorului
+  const lastWrongEventTsRef = useRef<number>(0);
+
   // ── Sync loot box din Realtime → ambii văd adăugările profesorului ───────────
   useEffect(() => {
     if (!liveState) return;
@@ -1886,6 +1898,30 @@ export default function DashboardPage() {
       setVocabularyLoot(vocabFromDB as string[]);
     }
   }, [liveState]);
+
+  // ── Profesor: oglindire badge XP când elevul câștigă XP autonom ──────────────
+  useEffect(() => {
+    if (!isTeacher || screen !== 'app' || !liveState) return;
+    const ev = (liveState.exercise_data as Record<string, unknown>)?.xp_event as
+      { amount: number; ts: number } | null | undefined;
+    if (ev && ev.ts !== lastXpEventTsRef.current) {
+      lastXpEventTsRef.current = ev.ts;
+      setXpToast(ev.amount);
+      playSuccessSound(ev.amount);
+    }
+  }, [isTeacher, screen, liveState]);
+
+  // ── Profesor: oglindire sunet răspuns greșit când elevul greșește în Time Travel ─
+  useEffect(() => {
+    if (!isTeacher || screen !== 'app' || !liveState) return;
+    const answers = (liveState.exercise_data as Record<string, unknown>)
+      ?.student_time_travel_answers as { wrongEventTs?: number | null } | null | undefined;
+    const ts = answers?.wrongEventTs;
+    if (ts && ts !== lastWrongEventTsRef.current) {
+      lastWrongEventTsRef.current = ts;
+      playWrongSound();
+    }
+  }, [isTeacher, screen, liveState]);
 
   // ── Profesor: sync XP + skills în exercise_data → elev vede prin Realtime ────
   // Debounce 300ms pentru a nu suprasolicita DB la click repetat pe +/-
@@ -2031,18 +2067,21 @@ export default function DashboardPage() {
   }, []);
 
   // ── Detecție session_closed via Realtime (pentru elev) ────────────────────────
+  // IMPORTANT: fără cleanup → timer-ul nu se anulează la fiecare update Realtime.
+  // Garda via ref împiedică pornirea unui al doilea timer.
   useEffect(() => {
     if (screen !== 'app' || isTeacher || !liveState) return;
     const ed = liveState.exercise_data;
     if (ed && typeof ed === 'object' && (ed as Record<string, unknown>).session_closed === true) {
+      if (sessionClosedTimerRef.current) return; // timer deja pornit, ignorăm
       setSessionClosedVisible(true);
-      const timer = setTimeout(() => {
+      sessionClosedTimerRef.current = setTimeout(() => {
+        sessionClosedTimerRef.current = null;
         if (autoSaveRef.current) clearTimeout(autoSaveRef.current);
         clearStoredSession();
         resetAppState();
         setScreen('landing');
       }, 3000);
-      return () => clearTimeout(timer);
     }
   }, [liveState, screen, isTeacher, resetAppState]);
 
@@ -2197,7 +2236,26 @@ export default function DashboardPage() {
         },
       };
     });
-  }, []);
+    // Elev: salvează evenimentul XP în exercise_data → profesorul vede badge-ul prin Realtime
+    if (!isTeacher && sessionId) {
+      const ts = Date.now();
+      supabase
+        .from('session_state')
+        .select('exercise_data')
+        .eq('session_id', sessionId)
+        .maybeSingle()
+        .then(({ data: cur }) => {
+          const ex =
+            typeof cur?.exercise_data === 'object' && cur.exercise_data !== null
+              ? (cur.exercise_data as Record<string, unknown>)
+              : {};
+          return supabase
+            .from('session_state')
+            .update({ exercise_data: { ...ex, xp_event: { amount, ts } } })
+            .eq('session_id', sessionId);
+        });
+    }
+  }, [isTeacher, sessionId]);
 
   const addVocab = useCallback(async (word: string) => {
     if (vocabularyLoot.includes(word)) return;
@@ -2238,7 +2296,11 @@ export default function DashboardPage() {
       }]);
     }
     setIsSaving(false);
-  }, [sessionId]);
+    // Auto-generate Time Travel exercises when the teacher activates this view
+    if (newView === 'tense_arena' && student) {
+      generateTimeTravelContent(sessionId, student.level).catch(console.error);
+    }
+  }, [sessionId, student]);
 
   // ── Ajustare nivel skill (profesor only) ─────────────────────────────────────
   const adjustSkill = useCallback(async (
@@ -2357,6 +2419,19 @@ export default function DashboardPage() {
     ? (rawQuestBoosters as string[])
     : null;
 
+  const rawTimeTravel = ed.time_travel_data;
+  const timeTravelData: TimeTravelData | null = Array.isArray(rawTimeTravel)
+    ? (rawTimeTravel as TimeTravelData)
+    : null;
+
+  const rawStudentTTAnswers = ed.student_time_travel_answers;
+  const studentTimeTravelAnswers: StudentTimeTravelAnswers | null =
+    rawStudentTTAnswers &&
+    typeof rawStudentTTAnswers === 'object' &&
+    Array.isArray((rawStudentTTAnswers as StudentTimeTravelAnswers).lockedAnswers)
+      ? (rawStudentTTAnswers as StudentTimeTravelAnswers)
+      : null;
+
   // ── App principal ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-pink-200 selection:text-pink-900 font-sans antialiased overflow-x-hidden">
@@ -2467,6 +2542,17 @@ export default function DashboardPage() {
             onQuestGenerated={handleQuestGenerated}
             addXp={addXp}
             studentBoosterProgress={studentQuestBoosters}
+          />
+        )}
+        {currentView === 'tense_arena' && (
+          <TimeTravelView
+            studentLevel={student.level}
+            sessionId={sessionId}
+            timeTravelData={timeTravelData}
+            isTeacher={isTeacher}
+            onBack={isTeacher ? () => changeView('dashboard') : undefined}
+            addXp={addXp}
+            studentAnswers={studentTimeTravelAnswers}
           />
         )}
       </main>

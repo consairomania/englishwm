@@ -8,6 +8,36 @@ function getCtx(): AudioContext {
   return _ctx;
 }
 
+export function playWrongSound() {
+  try {
+    const ctx = getCtx();
+    // Buzzer descendent: două note joase cu waveform dur
+    const notes: NotePattern[] = [
+      [380, 0.14, 0.00],
+      [260, 0.22, 0.14],
+    ];
+    ctx.resume().then(() => {
+      notes.forEach(([freq, dur, offset]) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = freq;
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        const t = ctx.currentTime + offset;
+        gain.gain.setValueAtTime(0, t);
+        gain.gain.linearRampToValueAtTime(0.18, t + 0.01);
+        gain.gain.setValueAtTime(0.18, t + dur - 0.04);
+        gain.gain.linearRampToValueAtTime(0, t + dur);
+        osc.start(t);
+        osc.stop(t + dur + 0.05);
+      });
+    });
+  } catch {
+    // Audio blocat de browser — se ignoră silențios
+  }
+}
+
 export function playSuccessSound(_amount?: number) {
   try {
     const ctx = getCtx();

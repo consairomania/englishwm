@@ -13,7 +13,7 @@ export type Session = {
 
 export type SessionState = {
   session_id: string;
-  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena';
+  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena';
   exercise_data: Record<string, unknown>;
   teacher_pings: unknown[];
   updated_at: string;
@@ -55,6 +55,15 @@ export type QuestData = {
   vocabulary_to_use: string[];
   boosters: { id: string; label: string; xp: number }[];
 };
+
+export type TimeTravelItem = {
+  sentence_en: string;
+  sentence_ro: string;
+  options: string[];
+  correct_index: number;
+};
+
+export type TimeTravelData = TimeTravelItem[];
 
 // Erori structurate pentru debug panel
 export type DebugError = {
