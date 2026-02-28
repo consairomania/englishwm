@@ -52,9 +52,11 @@ CONSTRAINTS:
 - Sentence ends with correct punctuation attached to last word (e.g. "hotel.").
 - All words in "scrambled" come from "sentence" — no additions.
 - "scrambled" must be in a DIFFERENT order than the sentence.
+- In "scrambled", each word must appear EXACTLY as in "sentence" — including any trailing punctuation. Never separate or strip punctuation.
 
 Return ONLY valid JSON (no markdown) matching exactly:
-{ "sentence": string, "scrambled": string[], "instruction_en": string, "hint_en": string, "hint_ro": string }`,
+{ "sentence": string, "sentence_ro": string, "scrambled": string[], "instruction_en": string, "hint_en": string, "hint_ro": string }
+Where sentence_ro is a natural Romanian translation of the full English sentence.`,
     generationConfig: { responseMimeType: 'application/json', temperature: 0.8 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
@@ -62,13 +64,52 @@ Return ONLY valid JSON (no markdown) matching exactly:
   const text = result.response.text();
   const puzzle = JSON.parse(text) as PuzzleData;
 
-  // Resetăm progresul elevului când profesorul generează un puzzle nou
-  await mergeExerciseData(sessionId, { puzzle_data: puzzle, student_puzzle_progress: null });
+  // Sanitizare completă: normalizăm casing-ul și punctuația din scrambled față de sentence
+  const sentenceWords = puzzle.sentence.split(/\s+/).filter(Boolean);
+
+  // Construim un word bank: lowercase → coada formelor exacte din sentence
+  // (tratăm corect duplicate, ex: "the" apare ca "The" și "the" în aceeași propoziție)
+  const wordBank = new Map<string, string[]>();
+  for (const w of sentenceWords) {
+    const key = w.toLowerCase();
+    if (!wordBank.has(key)) wordBank.set(key, []);
+    wordBank.get(key)!.push(w);
+  }
+  // Înlocuim fiecare cuvânt din scrambled cu forma sa exactă din sentence
+  puzzle.scrambled = puzzle.scrambled.map(w => {
+    const queue = wordBank.get(w.toLowerCase());
+    if (queue && queue.length > 0) return queue.shift()!;
+    return w;
+  });
+
+  // Fallback: dacă ultimul cuvânt din sentence are punctuație și nu apare în scrambled, o adăugăm
+  const lastSentenceWord = sentenceWords[sentenceWords.length - 1];
+  const punctMatch = lastSentenceWord.match(/[.!?,;:]+$/);
+  if (punctMatch) {
+    const punct = punctMatch[0];
+    const baseWord = lastSentenceWord.slice(0, -punct.length);
+    const alreadyOk = puzzle.scrambled.some(
+      w => w.toLowerCase() === lastSentenceWord.toLowerCase()
+    );
+    if (!alreadyOk) {
+      const idx = puzzle.scrambled.findIndex(
+        w => w.toLowerCase() === baseWord.toLowerCase()
+      );
+      if (idx !== -1) puzzle.scrambled[idx] = puzzle.scrambled[idx] + punct;
+    }
+  }
+
+  // Resetăm progresul elevului și vizibilitatea traducerii când profesorul generează un puzzle nou
+  await mergeExerciseData(sessionId, { puzzle_data: puzzle, student_puzzle_progress: null, puzzle_show_translation: null });
   return puzzle;
 }
 
 export async function clearPuzzleContent(sessionId: string): Promise<void> {
-  await mergeExerciseData(sessionId, { puzzle_data: null, student_puzzle_progress: null });
+  await mergeExerciseData(sessionId, { puzzle_data: null, student_puzzle_progress: null, puzzle_show_translation: null });
+}
+
+export async function setPuzzleShowTranslation(sessionId: string, show: boolean): Promise<void> {
+  await mergeExerciseData(sessionId, { puzzle_show_translation: show });
 }
 
 // ─── Voyager ──────────────────────────────────────────────────────────────────

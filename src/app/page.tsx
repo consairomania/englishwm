@@ -34,6 +34,8 @@ import {
   Clock,
   Volume2,
   VolumeX,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -59,6 +61,7 @@ import type { SessionState, DebugError, Student as DBStudent, PuzzleData, Voyage
 import {
   generatePuzzleContent,
   clearPuzzleContent,
+  setPuzzleShowTranslation,
   generateVoyagerContent,
   clearVoyagerContent,
   deleteVoyagerImage,
@@ -941,6 +944,7 @@ function PuzzleView({
   onPuzzleGenerated,
   addXp,
   studentProgress,
+  showTranslation,
 }: {
   student: Student;
   onBack?: () => void;
@@ -950,6 +954,7 @@ function PuzzleView({
   onPuzzleGenerated: (data: PuzzleData | null) => void;
   addXp: (amount: number) => void;
   studentProgress?: PuzzleProgress | null;
+  showTranslation: boolean;
 }) {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
@@ -1049,6 +1054,10 @@ function PuzzleView({
     onPuzzleGenerated(null);
   };
 
+  const handleToggleTranslation = async () => {
+    await setPuzzleShowTranslation(sessionId, !showTranslation);
+  };
+
   const usedIndices = new Set(userSelection.map(s => s.idx));
 
   return (
@@ -1133,6 +1142,39 @@ function PuzzleView({
         </div>
       )}
 
+      {/* Profesor: traducere română + toggle vizibilitate elev */}
+      {isTeacher && puzzleData?.sentence_ro && (
+        <div className="bg-indigo-50 p-4 rounded-[20px] border border-indigo-100 space-y-2">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">
+              Traducere RO
+            </p>
+            <button
+              onClick={handleToggleTranslation}
+              className={`flex items-center gap-1.5 px-3 py-1 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${
+                showTranslation
+                  ? 'bg-indigo-500 text-white'
+                  : 'bg-white border border-indigo-200 text-indigo-500 hover:bg-indigo-100'
+              }`}
+            >
+              {showTranslation ? <Eye size={11} /> : <EyeOff size={11} />}
+              {showTranslation ? 'Vizibil elevului' : 'Arată elevului'}
+            </button>
+          </div>
+          <p className="text-sm text-indigo-900 font-medium italic">{puzzleData.sentence_ro}</p>
+        </div>
+      )}
+
+      {/* Profesor: soluția EN — doar pentru profesor, nu se poate trimite elevului */}
+      {isTeacher && puzzleData?.sentence && (
+        <div className="bg-emerald-50 p-4 rounded-[20px] border border-emerald-100 space-y-1">
+          <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest">
+            Soluție EN — doar profesor
+          </p>
+          <p className="text-sm text-emerald-900 font-semibold">{puzzleData.sentence}</p>
+        </div>
+      )}
+
       {/* Niciun puzzle activ */}
       {!puzzleData ? (
         <div className="bg-white p-6 sm:p-10 rounded-[30px] shadow-xl border border-slate-50 text-center space-y-4">
@@ -1177,6 +1219,14 @@ function PuzzleView({
                 ro={puzzleData.hint_ro}
               />
             </div>
+            {!isTeacher && showTranslation && puzzleData.sentence_ro && (
+              <div className="pt-3 border-t border-slate-50">
+                <p className="text-[9px] font-black text-indigo-500 uppercase tracking-widest mb-1">
+                  Traducere
+                </p>
+                <p className="text-sm text-slate-600 italic">{puzzleData.sentence_ro}</p>
+              </div>
+            )}
           </div>
 
           {/* Zona de construcție */}
@@ -2400,6 +2450,8 @@ export default function DashboardPage() {
       ? (rawPuzzle as PuzzleData)
       : null;
 
+  const puzzleShowTranslation = ed.puzzle_show_translation === true;
+
   const rawVoyager = ed.voyager_data;
   const voyagerData: VoyagerData | null =
     rawVoyager && typeof rawVoyager === 'object' && !Array.isArray(rawVoyager)
@@ -2541,6 +2593,7 @@ export default function DashboardPage() {
             onPuzzleGenerated={handlePuzzleGenerated}
             addXp={addXp}
             studentProgress={studentPuzzleProgress}
+            showTranslation={puzzleShowTranslation}
           />
         )}
         {currentView === 'voyager' && (

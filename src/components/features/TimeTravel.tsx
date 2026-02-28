@@ -30,6 +30,7 @@ const WRONG_FLASH_MS = 1500;
 const N = 15; // numărul de exerciții generat
 
 export type StudentTimeTravelAnswers = {
+  timeTravelKey?: string | null;
   lockedAnswers: (number | null)[];
   flashWrong: (number | null)[];
   wrongEventTs: number | null;
@@ -82,12 +83,24 @@ export function TimeTravelView({
   // Folosim un string-key derivat din prima propoziție: egal prin valoare, nu prin referință.
   const timeTravelKey = timeTravelData?.[0]?.sentence_en ?? null;
   useEffect(() => {
-    lockedRef.current = Array(N).fill(null);
-    flashRef.current = Array(N).fill(null);
-    xpAwardedRef.current = Array(N).fill(false);
-    setLockedAnswers(Array(N).fill(null));
-    setFlashWrong(Array(N).fill(null));
-    setWrongEventTs(null);
+    if (timeTravelKey && studentAnswers?.timeTravelKey === timeTravelKey) {
+      // Același exercițiu, pagina a fost reîncărcată → restaurează răspunsurile salvate
+      const restored = studentAnswers.lockedAnswers;
+      lockedRef.current = [...restored];
+      xpAwardedRef.current = restored.map((v) => v !== null);
+      flashRef.current = Array(N).fill(null);
+      setLockedAnswers([...restored]);
+      setFlashWrong(Array(N).fill(null));
+      setWrongEventTs(null);
+    } else {
+      // Exercițiu nou sau prima încărcare fără răspunsuri salvate → reset complet
+      lockedRef.current = Array(N).fill(null);
+      flashRef.current = Array(N).fill(null);
+      xpAwardedRef.current = Array(N).fill(false);
+      setLockedAnswers(Array(N).fill(null));
+      setFlashWrong(Array(N).fill(null));
+      setWrongEventTs(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [timeTravelKey]);
 
@@ -110,7 +123,7 @@ export function TimeTravelView({
         .update({
           exercise_data: {
             ...ex,
-            student_time_travel_answers: { lockedAnswers, flashWrong, wrongEventTs },
+            student_time_travel_answers: { timeTravelKey, lockedAnswers, flashWrong, wrongEventTs },
           },
         })
         .eq('session_id', sessionId);

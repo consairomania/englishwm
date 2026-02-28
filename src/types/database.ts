@@ -30,6 +30,7 @@ export type Student = {
 
 export type PuzzleData = {
   sentence: string;
+  sentence_ro: string;
   scrambled: string[];
   instruction_en: string;
   hint_en: string;
