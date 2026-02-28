@@ -32,6 +32,8 @@ import {
   Check,
   X,
   Clock,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -42,7 +44,7 @@ import {
   fetchSessionStudentId,
 } from '@/lib/seedSession';
 import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/roomCode';
-import { playSuccessSound, playWrongSound } from '@/lib/sound';
+import { playSuccessSound, playWrongSound, setSoundMuted } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import { TimeTravelView, StudentTimeTravelAnswers } from '@/components/features/TimeTravel';
 import {
@@ -1860,6 +1862,9 @@ export default function DashboardPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [selectedDBStudent, setSelectedDBStudent] = useState<DBStudent | null>(null);
   const [profileError, setProfileError] = useState('');
+  const [soundMuted, setSoundMutedState] = useState<boolean>(() => {
+    try { return localStorage.getItem('ewm_sound_muted') === 'true'; } catch { return false; }
+  });
   const [sessionClosedVisible, setSessionClosedVisible] = useState(false);
   const sessionClosedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [studentLocalView, setStudentLocalView] = useState<SessionState['current_view'] | null>(null);
@@ -1884,6 +1889,15 @@ export default function DashboardPage() {
     setProfileError('');
     setSessionClosedVisible(false);
   }, []);
+
+  // ── Sincronizează flagul de mute la nivelul modulului sound.ts ──────────────
+  useEffect(() => { setSoundMuted(soundMuted); }, [soundMuted]);
+
+  const handleToggleSound = () => {
+    const next = !soundMuted;
+    setSoundMutedState(next);
+    try { localStorage.setItem('ewm_sound_muted', String(next)); } catch {}
+  };
 
   // Ref pentru oglindirea badge-ului XP pe ecranul profesorului
   const lastXpEventTsRef = useRef<number>(0);
@@ -2468,6 +2482,15 @@ export default function DashboardPage() {
             <span className={`px-3 py-1.5 rounded-xl font-bold text-[10px] uppercase tracking-widest ${isTeacher ? 'bg-pink-600 text-white' : 'bg-slate-900 text-white'}`}>
               {isTeacher ? 'Profesor' : student.name}
             </span>
+
+            {/* Mute/Unmute sunete — vizibil pentru toți */}
+            <button
+              onClick={handleToggleSound}
+              className="p-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-400 transition-all"
+              title={soundMuted ? 'Activează sunetele' : 'Dezactivează sunetele'}
+            >
+              {soundMuted ? <VolumeX size={16} /> : <Volume2 size={16} />}
+            </button>
 
             {/* Profesor: buton LogOut (închide sesiunea pentru toți) */}
             {isTeacher && (

@@ -1,6 +1,9 @@
 // Pattern de note: [frecventa_hz, durata_nota_s, offset_start_s]
 type NotePattern = [number, number, number];
 
+let _muted = false;
+export function setSoundMuted(muted: boolean): void { _muted = muted; }
+
 let _ctx: AudioContext | null = null;
 
 function getCtx(): AudioContext {
@@ -9,6 +12,7 @@ function getCtx(): AudioContext {
 }
 
 export function playWrongSound() {
+  if (_muted) return;
   try {
     const ctx = getCtx();
     // Buzzer descendent: două note joase cu waveform dur
@@ -39,6 +43,7 @@ export function playWrongSound() {
 }
 
 export function playSuccessSound(_amount?: number) {
+  if (_muted) return;
   try {
     const ctx = getCtx();
 
