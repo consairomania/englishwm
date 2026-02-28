@@ -37,7 +37,8 @@ function fillBlanks(sentence: string, option: string): string {
   if (blanks <= 1) return sentence.replace('___', option);
   let result = sentence;
   for (let i = 0; i < blanks; i++) {
-    const word = i < words.length ? words[i] : (words[words.length - 1] ?? '');
+    const isLast = i === blanks - 1;
+    const word = isLast ? words.slice(i).join(' ') : (words[i] ?? '');
     result = result.replace('___', word);
   }
   return result;
