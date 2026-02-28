@@ -86,6 +86,7 @@ const LS = {
   role: 'ewm_role',
   roomCode: 'ewm_room_code',
   studentDbId: 'ewm_student_db_id',
+  voyagerImageUrl: 'ewm_voyager_image_url',
 } as const;
 
 function saveStoredSession(
@@ -1355,6 +1356,7 @@ function VoyagerView({
   onVoyagerGenerated,
   addXp,
   studentTaskProgress,
+  cachedImageUrl,
 }: {
   student: Student;
   onBack?: () => void;
@@ -1364,16 +1366,24 @@ function VoyagerView({
   onVoyagerGenerated: (data: VoyagerData | null) => void;
   addXp: (amount: number) => void;
   studentTaskProgress?: boolean[] | null;
+  cachedImageUrl?: string | null;
 }) {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
   // Stare locală optimistă — doar profesorul actualizează (UI snap înainte ca Realtime să confirme)
   const [localTasks, setLocalTasks] = useState<boolean[]>([false, false, false]);
-  const [imageLoading, setImageLoading] = useState(true);
+  // Dacă avem deja un URL (din DB sau cache), nu pornim cu spinner
+  const [imageLoading, setImageLoading] = useState(!voyagerData?.image_url && !cachedImageUrl);
   const [imageError, setImageError] = useState(false);
+  // Ref pentru a nu reseta imageLoading la primul mount (când imaginea există deja)
+  const isFirstRender = useRef(true);
 
   useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
     setLocalTasks([false, false, false]);
     setImageLoading(true);
     setImageError(false);
@@ -1918,6 +1928,9 @@ export default function DashboardPage() {
   const [sessionClosedVisible, setSessionClosedVisible] = useState(false);
   const sessionClosedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [studentLocalView, setStudentLocalView] = useState<SessionState['current_view'] | null>(null);
+  const [cachedVoyagerImageUrl, setCachedVoyagerImageUrl] = useState<string | null>(() => {
+    try { return localStorage.getItem(LS.voyagerImageUrl); } catch { return null; }
+  });
 
   const { state: liveState } = useSyncSession(sessionId);
   const effectiveState = liveState ?? localSession;
@@ -1961,6 +1974,27 @@ export default function DashboardPage() {
     if (Array.isArray(vocabFromDB)) {
       setVocabularyLoot(vocabFromDB as string[]);
     }
+  }, [liveState]);
+
+  // ── Persistă image_url Voyager în localStorage → supraviețuiește la refresh ───
+  useEffect(() => {
+    if (!liveState) return; // sesiune nepornită — nu atingem cache-ul
+    const ed = liveState.exercise_data as Record<string, unknown> | null;
+    const rawVoyager = ed?.voyager_data;
+    // rawVoyager undefined → voyager_data nu a fost setat niciodată, păstrăm cache-ul
+    if (rawVoyager === undefined) return;
+    const imageUrl = rawVoyager && typeof rawVoyager === 'object' && !Array.isArray(rawVoyager)
+      ? ((rawVoyager as Record<string, unknown>).image_url as string | null) ?? null
+      : null;
+    try {
+      if (imageUrl) {
+        localStorage.setItem(LS.voyagerImageUrl, imageUrl);
+        setCachedVoyagerImageUrl(imageUrl);
+      } else {
+        localStorage.removeItem(LS.voyagerImageUrl);
+        setCachedVoyagerImageUrl(null);
+      }
+    } catch { /* SSR / private browsing */ }
   }, [liveState]);
 
   // ── Profesor: oglindire badge XP când elevul câștigă XP autonom ──────────────
@@ -2606,6 +2640,7 @@ export default function DashboardPage() {
             onVoyagerGenerated={handleVoyagerGenerated}
             addXp={addXp}
             studentTaskProgress={studentVoyagerTasks}
+            cachedImageUrl={cachedVoyagerImageUrl}
           />
         )}
         {currentView === 'arena' && (
