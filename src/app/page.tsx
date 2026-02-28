@@ -966,12 +966,22 @@ function PuzzleView({
   const [xpAwarded, setXpAwarded] = useState(false);
   const progressSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Reset interacțiunile locale când se schimbă puzzle-ul
+  // Reset sau restaurare când se schimbă puzzle-ul (sau la mount după refresh)
   useEffect(() => {
-    setUserSelection([]);
-    setIsCorrect(false);
+    // Restaurare la refresh: dacă există progres salvat (selecții / răspuns corect), îl refolosim
+    // student_puzzle_progress este resetat la null de server când profesorul generează un puzzle nou,
+    // deci dacă există date, aparțin cu siguranță puzzle-ului curent.
+    if (studentProgress?.is_correct || (studentProgress?.selection?.length ?? 0) > 0) {
+      setUserSelection(studentProgress!.selection);
+      setIsCorrect(studentProgress!.is_correct);
+      setXpAwarded(studentProgress!.is_correct); // previne re-acordarea XP la refresh
+    } else {
+      setUserSelection([]);
+      setIsCorrect(false);
+      setXpAwarded(false);
+    }
     setIsWrong(false);
-    setXpAwarded(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [puzzleData?.sentence]);
 
   // Elev → salvează selecția în exercise_data (debounced 400ms) → profesor vede live
