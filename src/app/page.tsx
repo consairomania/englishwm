@@ -299,6 +299,7 @@ function TeacherHome({
   const [adding, setAdding] = useState(false);
   const [selectedId, setSelectedId] = useState<string>('');
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [addError, setAddError] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -338,6 +339,7 @@ function TeacherHome({
   };
 
   const handleStartEdit = (s: DBStudent) => {
+    setConfirmDeleteId(null);
     setEditingId(s.id);
     setEditName(s.name);
     setEditLevel(s.level);
@@ -533,25 +535,40 @@ function TeacherHome({
                       </p>
                     </div>
                     <div className="flex gap-1.5 shrink-0">
-                      <button
-                        onClick={() => handleStartEdit(s)}
-                        className="p-2 rounded-xl bg-white hover:bg-blue-50 text-slate-300 hover:text-blue-500 transition-all border border-slate-100"
-                        title="Editează"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <button
-                        onClick={() => handleDelete(s.id)}
-                        disabled={deleting === s.id}
-                        className="p-2 rounded-xl bg-white hover:bg-rose-50 text-slate-300 hover:text-rose-500 transition-all border border-slate-100 disabled:opacity-40"
-                        title="Șterge"
-                      >
-                        {deleting === s.id ? (
-                          <Loader2 className="animate-spin" size={14} />
-                        ) : (
-                          <Trash2 size={14} />
-                        )}
-                      </button>
+                      {confirmDeleteId === s.id ? (
+                        <>
+                          <button
+                            onClick={() => { handleDelete(s.id); setConfirmDeleteId(null); }}
+                            disabled={deleting === s.id}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-rose-600 text-white font-black text-[10px] uppercase tracking-widest hover:bg-rose-700 transition-all disabled:opacity-40"
+                          >
+                            {deleting === s.id ? <Loader2 className="animate-spin" size={12} /> : <><Trash2 size={12} /> Da, șterge</>}
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(null)}
+                            className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white text-slate-500 font-black text-[10px] uppercase tracking-widest hover:bg-slate-100 border border-slate-200 transition-all"
+                          >
+                            <X size={12} /> Anulează
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            onClick={() => handleStartEdit(s)}
+                            className="p-2 rounded-xl bg-white hover:bg-blue-50 text-slate-300 hover:text-blue-500 transition-all border border-slate-100"
+                            title="Editează"
+                          >
+                            <Pencil size={14} />
+                          </button>
+                          <button
+                            onClick={() => setConfirmDeleteId(s.id)}
+                            className="p-2 rounded-xl bg-white hover:bg-rose-50 text-slate-300 hover:text-rose-500 transition-all border border-slate-100"
+                            title="Șterge"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
                 )}
