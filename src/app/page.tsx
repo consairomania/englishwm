@@ -36,6 +36,7 @@ import {
   VolumeX,
   Eye,
   EyeOff,
+  Shuffle,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -1014,13 +1015,13 @@ function PuzzleView({
   }, [userSelection, isCorrect, isTeacher, sessionId]);
 
   const handleGenerate = async () => {
-    if (!topic.trim() || isGenerating) return;
+    if (isGenerating) return;
     setIsGenerating(true);
     setGenError('');
     try {
-      const data = await generatePuzzleContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generatePuzzleContent(sessionId, topic.trim(), student.level);
       onPuzzleGenerated(data);
-      setTopic('');
+      setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare necunoscută. Încearcă din nou.');
     }
@@ -1097,7 +1098,7 @@ function PuzzleView({
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-purple-400 transition-all font-bold text-slate-700 text-sm placeholder:font-medium placeholder:text-slate-300"
-              placeholder="Scenariu / subiect... (ex: Booking a hotel)"
+              placeholder="Scenariu / subiect... (lasă gol pentru random)"
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
@@ -1105,13 +1106,13 @@ function PuzzleView({
             />
             <button
               onClick={handleGenerate}
-              disabled={!topic.trim() || isGenerating}
+              disabled={isGenerating}
               className="px-5 py-3 bg-purple-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
             >
               {isGenerating
                 ? <Loader2 className="animate-spin" size={16} />
-                : <Send size={15} />}
-              {isGenerating ? 'Generez...' : 'Build'}
+                : topic.trim() ? <Send size={15} /> : <Shuffle size={15} />}
+              {isGenerating ? 'Generez...' : topic.trim() ? 'Build' : 'Random'}
             </button>
           </div>
           {genError && (
@@ -1405,13 +1406,13 @@ function VoyagerView({
   );
 
   const handleGenerate = async () => {
-    if (!topic.trim() || isGenerating) return;
+    if (isGenerating) return;
     setIsGenerating(true);
     setGenError('');
     try {
-      const data = await generateVoyagerContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generateVoyagerContent(sessionId, topic.trim(), student.level);
       onVoyagerGenerated(data);
-      setTopic('');
+      setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
@@ -1468,7 +1469,7 @@ function VoyagerView({
           <div className="flex flex-col sm:flex-row gap-2">
             <textarea
               className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-pink-400 transition-all font-bold text-slate-700 text-sm placeholder:font-medium placeholder:text-slate-300 resize-none"
-              placeholder="Descrie scena... (ex: A busy market in Tokyo)"
+              placeholder="Descrie scena... (lasă gol pentru random)"
               rows={2}
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
@@ -1476,11 +1477,11 @@ function VoyagerView({
             />
             <button
               onClick={handleGenerate}
-              disabled={!topic.trim() || isGenerating}
+              disabled={isGenerating}
               className="px-5 py-3 bg-pink-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-pink-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md self-end"
             >
-              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={15} />}
-              {isGenerating ? 'Generez...' : 'Build'}
+              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : topic.trim() ? <Sparkles size={15} /> : <Shuffle size={15} />}
+              {isGenerating ? 'Generez...' : topic.trim() ? 'Build' : 'Random'}
             </button>
           </div>
           {genError && (
@@ -1646,13 +1647,13 @@ function ArenaView({
   const effectiveClaimed = new Set([...(studentBoosterProgress ?? []), ...localClaimed]);
 
   const handleGenerate = async () => {
-    if (!topic.trim() || isGenerating) return;
+    if (isGenerating) return;
     setIsGenerating(true);
     setGenError('');
     try {
-      const data = await generateQuestContent(sessionId, topic.trim(), student.level);
+      const { data, chosenTopic } = await generateQuestContent(sessionId, topic.trim(), student.level);
       onQuestGenerated(data);
-      setTopic('');
+      setTopic(topic.trim() ? '' : chosenTopic);
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
@@ -1709,7 +1710,7 @@ function ArenaView({
           <div className="flex flex-col sm:flex-row gap-2">
             <input
               className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-emerald-400 transition-all font-bold text-slate-700 text-sm placeholder:font-medium placeholder:text-slate-300"
-              placeholder="Contextul misiunii... (ex: Checking into a hotel)"
+              placeholder="Contextul misiunii... (lasă gol pentru random)"
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
@@ -1717,11 +1718,11 @@ function ArenaView({
             />
             <button
               onClick={handleGenerate}
-              disabled={!topic.trim() || isGenerating}
+              disabled={isGenerating}
               className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
             >
-              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : <Sword size={15} />}
-              {isGenerating ? 'Generez...' : 'Launch'}
+              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : topic.trim() ? <Sword size={15} /> : <Shuffle size={15} />}
+              {isGenerating ? 'Generez...' : topic.trim() ? 'Launch' : 'Random'}
             </button>
           </div>
           {genError && (

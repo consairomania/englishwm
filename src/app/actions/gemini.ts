@@ -38,14 +38,18 @@ export async function generatePuzzleContent(
   sessionId: string,
   topic: string,
   level: string
-): Promise<PuzzleData> {
+): Promise<{ data: PuzzleData; chosenTopic: string }> {
+  const isRandom = !topic.trim();
   const genAI = getGenAI();
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Teacher creating sentence scramble puzzles.
 The student's level is ${level} (CEFR: A1–C2). Adjust complexity accordingly.
 
-TASK: Create ONE coherent English sentence about: "${topic}".
+${isRandom
+  ? 'Choose a creative and varied topic for this puzzle (everyday situations, travel, food, school, sports, nature, technology, hobbies, etc.). Be surprising and diverse.'
+  : `TASK: Create ONE coherent English sentence about: "${topic}".`
+}
 
 CONSTRAINTS:
 - Maximum 12 words total.
@@ -55,14 +59,26 @@ CONSTRAINTS:
 - In "scrambled", each word must appear EXACTLY as in "sentence" — including any trailing punctuation. Never separate or strip punctuation.
 
 Return ONLY valid JSON (no markdown) matching exactly:
-{ "sentence": string, "sentence_ro": string, "scrambled": string[], "instruction_en": string, "hint_en": string, "hint_ro": string }
+{ "chosen_topic": "the topic in English (2-5 words)", "sentence": string, "sentence_ro": string, "scrambled": string[], "instruction_en": string, "hint_en": string, "hint_ro": string }
 Where sentence_ro is a natural Romanian translation of the full English sentence.`,
     generationConfig: { responseMimeType: 'application/json', temperature: 0.8 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
-  const result = await model.generateContent(`Create puzzle about: "${topic}"`);
+  const contentPrompt = isRandom
+    ? 'Create a puzzle — choose an interesting and varied topic yourself'
+    : `Create puzzle about: "${topic}"`;
+  const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const puzzle = JSON.parse(text) as PuzzleData;
+  const raw = JSON.parse(text) as PuzzleData & { chosen_topic?: string };
+  const chosenTopic = topic.trim() || raw.chosen_topic || 'Random puzzle';
+  const puzzle: PuzzleData = {
+    sentence: raw.sentence,
+    sentence_ro: raw.sentence_ro,
+    scrambled: raw.scrambled,
+    instruction_en: raw.instruction_en,
+    hint_en: raw.hint_en,
+    hint_ro: raw.hint_ro,
+  };
 
   // Sanitizare completă: normalizăm casing-ul și punctuația din scrambled față de sentence
   const sentenceWords = puzzle.sentence.split(/\s+/).filter(Boolean);
@@ -101,7 +117,7 @@ Where sentence_ro is a natural Romanian translation of the full English sentence
 
   // Resetăm progresul elevului și vizibilitatea traducerii când profesorul generează un puzzle nou
   await mergeExerciseData(sessionId, { puzzle_data: puzzle, student_puzzle_progress: null, puzzle_show_translation: null });
-  return puzzle;
+  return { data: puzzle, chosenTopic };
 }
 
 export async function clearPuzzleContent(sessionId: string): Promise<void> {
@@ -117,17 +133,23 @@ export async function generateVoyagerContent(
   sessionId: string,
   topic: string,
   level: string
-): Promise<VoyagerData> {
+): Promise<{ data: VoyagerData; chosenTopic: string }> {
+  const isRandom = !topic.trim();
   const genAI = getGenAI();
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are a Creative English Teacher creating visual storytelling lessons.
-Student level: ${level} (CEFR). Topic: "${topic}".
+Student level: ${level} (CEFR).
+${isRandom
+  ? 'Choose a creative and surprising scene topic for this lesson (exotic markets, space stations, medieval villages, underwater worlds, jungle temples, futuristic cities, etc.). Be varied and imaginative.'
+  : `Topic: "${topic}".`
+}
 
 Generate a rich bilingual scene for language learning.
 
 Return ONLY valid JSON (no markdown):
 {
+  "chosen_topic": "the scene topic in English (2-5 words)",
   "image_prompt": "Detailed English prompt for image generation (max 30 words, vivid scene description)",
   "story_en": "Short engaging scene story in English (2-3 sentences, level-appropriate)",
   "story_ro": "Romanian translation of the story",
@@ -146,9 +168,15 @@ Rules:
     generationConfig: { responseMimeType: 'application/json', temperature: 0.9 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
-  const result = await model.generateContent(`Create visual scene about: "${topic}"`);
+  const contentPrompt = isRandom
+    ? 'Create visual scene — choose a creative and surprising topic yourself'
+    : `Create visual scene about: "${topic}"`;
+  const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const generated = JSON.parse(text) as Omit<VoyagerData, 'image_url' | 'image_path'>;
+  const raw = JSON.parse(text) as Omit<VoyagerData, 'image_url' | 'image_path'> & { chosen_topic?: string };
+  const chosenTopic = topic.trim() || raw.chosen_topic || 'Random scene';
+  const { chosen_topic: _ct, ...generatedFields } = raw;
+  const generated = generatedFields as Omit<VoyagerData, 'image_url' | 'image_path'>;
 
   // Șterge imaginea veche din Storage dacă există
   const { data: current } = await supabase
@@ -221,7 +249,7 @@ Rules:
     image_path: imagePath,
   };
   await mergeExerciseData(sessionId, { voyager_data: voyagerData, student_voyager_tasks: null });
-  return voyagerData;
+  return { data: voyagerData, chosenTopic };
 }
 
 // Șterge imaginea din Storage (apelat la logout / clear)
@@ -251,17 +279,23 @@ export async function generateQuestContent(
   sessionId: string,
   topic: string,
   level: string
-): Promise<QuestData> {
+): Promise<{ data: QuestData; chosenTopic: string }> {
+  const isRandom = !topic.trim();
   const genAI = getGenAI();
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Coach creating immersive roleplay quests.
-Student level: ${level} (CEFR). Context/topic: "${topic}".
+Student level: ${level} (CEFR).
+${isRandom
+  ? 'Choose a creative and varied roleplay context for this quest (airport check-in, job interview, restaurant order, doctor visit, lost in a city, negotiating a deal, etc.). Be diverse and surprising.'
+  : `Context/topic: "${topic}".`
+}
 
 Create an engaging mission scenario for English practice.
 
 Return ONLY valid JSON (no markdown):
 {
+  "chosen_topic": "the quest context in English (2-5 words)",
   "title": "Quest title (English, max 5 words)",
   "mission_brief_en": "Mission briefing in English (2-3 sentences, level-appropriate)",
   "mission_brief_ro": "Romanian translation of mission brief",
@@ -283,12 +317,18 @@ Rules:
     generationConfig: { responseMimeType: 'application/json', temperature: 0.85 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
-  const result = await model.generateContent(`Create quest for: "${topic}"`);
+  const contentPrompt = isRandom
+    ? 'Create quest — choose a creative and varied context yourself'
+    : `Create quest for: "${topic}"`;
+  const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const quest = JSON.parse(text) as QuestData;
+  const raw = JSON.parse(text) as QuestData & { chosen_topic?: string };
+  const chosenTopic = topic.trim() || raw.chosen_topic || 'Random quest';
+  const { chosen_topic: _ct, ...questFields } = raw;
+  const quest = questFields as QuestData;
 
   await mergeExerciseData(sessionId, { quest_data: quest, student_quest_boosters: null });
-  return quest;
+  return { data: quest, chosenTopic };
 }
 
 export async function clearQuestContent(sessionId: string): Promise<void> {
