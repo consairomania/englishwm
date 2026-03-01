@@ -50,6 +50,11 @@ Data: 2026-03-01
 - Format vechi flat (`puzzle_data`, `time_travel_data` etc.): backward compat
 - Ambele formate suportate în useEffect init, handleSubmit, și render
 
+## Time Travel — Îmbunătățiri recente
+- **Selector nr. exerciții**: profesorul poate alege 1–15 exerciții via input numeric (default 15); valoarea e transmisă la `generateTimeTravelContent(... count)` → prompt-ul Gemini generează exact N exerciții.
+- **Regenerare item individual**: buton mic `RefreshCw` pe fiecare card (vizibil doar profesor) → `handleRegenerateItem(idx)` → `regenerateTimeTravelItem(sessionId, idx, ...)` în `gemini.ts` → înlocuiește itemul la indexul dat fără a afecta celelalte.
+- `TT_SPECIAL_STRUCTURE_INSTRUCTIONS` extras ca modul-level constant în `gemini.ts` (reutilizat de ambele funcții).
+
 ## Bug-uri rezolvate
 - Butonul TEMĂ nu funcționa: `localSession.exercise_data` era mereu gol; fix: `(liveState ?? localSession)?.exercise_data`
 - Homework section eliminată din DashboardView (acum dedicată în HomeworkPortfolioView)

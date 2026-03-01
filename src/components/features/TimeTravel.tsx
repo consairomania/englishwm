@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown, Zap } from 'lucide-react';
 import { FormattedLabel } from '@/components/FormattedLabel';
-import { generateTimeTravelContent, clearTimeTravelContent } from '@/app/actions/gemini';
+import { generateTimeTravelContent, clearTimeTravelContent, regenerateTimeTravelItem } from '@/app/actions/gemini';
 import { playWrongSound } from '@/lib/sound';
 import { supabase } from '@/lib/supabase/client';
 import type { TimeTravelData } from '@/types/database';
@@ -178,11 +178,13 @@ export function TimeTravelView({
   const [topic, setTopic] = useState('');
   // selectedTenses: [] = Automix (nicio restricție); altfel = tense-urile alese
   const [selectedTenses, setSelectedTenses] = useState<EnglishTense[]>([]);
+  const [exerciseCount, setExerciseCount] = useState(15);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
   const [isCoolingDown, setIsCoolingDown] = useState(false);
+  const [regeneratingIdx, setRegeneratingIdx] = useState<number | null>(null);
 
   // Ref pentru click-outside pe dropdown
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -294,7 +296,8 @@ export function TimeTravelView({
         studentLevel,
         topic.trim() || undefined,
         tensesToPass,
-        ageSegment
+        ageSegment,
+        exerciseCount
       );
       if (wasRandom) setTopic(chosenTopic);
     } catch (e) {
@@ -321,6 +324,27 @@ export function TimeTravelView({
 
   const handleClear = async () => {
     await clearTimeTravelContent(sessionId);
+  };
+
+  // ── Regenerare item individual (profesor) ─────────────────────────────────────
+  const handleRegenerateItem = async (idx: number) => {
+    if (regeneratingIdx !== null || isGenerating) return;
+    setRegeneratingIdx(idx);
+    try {
+      const tensesToPass = selectedTenses.length > 0 ? selectedTenses : undefined;
+      await regenerateTimeTravelItem(
+        sessionId,
+        idx,
+        studentLevel,
+        topic.trim() || undefined,
+        tensesToPass,
+        ageSegment
+      );
+    } catch {
+      // eroare silențioasă — profesorul poate reîncerca
+    } finally {
+      setRegeneratingIdx(null);
+    }
   };
 
   // ── Toggle tense în selecție ──────────────────────────────────────────────────
@@ -486,6 +510,20 @@ export function TimeTravelView({
               )}
             </div>
 
+            {/* Input nr. exerciții */}
+            <div className="flex items-center gap-2 shrink-0">
+              <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest whitespace-nowrap">Nr.:</span>
+              <input
+                type="number"
+                min={1}
+                max={15}
+                value={exerciseCount}
+                onChange={(e) => setExerciseCount(Math.max(1, Math.min(15, Number(e.target.value) || 1)))}
+                disabled={isGenerating}
+                className="w-14 px-2 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-indigo-400 transition-all font-black text-slate-700 text-sm text-center disabled:opacity-40"
+              />
+            </div>
+
             {/* Buton Surpriză */}
             <button
               onClick={handleSurprise}
@@ -582,8 +620,28 @@ export function TimeTravelView({
                   <span className="text-[9px] font-black text-indigo-600 uppercase tracking-widest bg-indigo-50 px-2 py-0.5 rounded-md">
                     {String(sentenceIdx + 1).padStart(2, '0')}
                   </span>
-                  {isSolved && <CheckCircle2 size={14} className="text-emerald-500 ml-auto" />}
-                  {isFlashing && <XCircle size={14} className="text-rose-500 ml-auto" />}
+                  <div className="ml-auto flex items-center gap-1.5">
+                    {isSolved && <CheckCircle2 size={14} className="text-emerald-500" />}
+                    {isFlashing && <XCircle size={14} className="text-rose-500" />}
+                    {isTeacher && (
+                      <button
+                        onClick={() => handleRegenerateItem(sentenceIdx)}
+                        disabled={regeneratingIdx !== null || isGenerating}
+                        title="Regenerează acest exercițiu"
+                        className={`p-1.5 rounded-lg transition-all disabled:opacity-30 ${
+                          regeneratingIdx === sentenceIdx
+                            ? 'text-indigo-500 bg-indigo-50'
+                            : 'text-slate-300 hover:text-indigo-500 hover:bg-indigo-50'
+                        }`}
+                      >
+                        {regeneratingIdx === sentenceIdx ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <RefreshCw size={12} />
+                        )}
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 <FormattedLabel

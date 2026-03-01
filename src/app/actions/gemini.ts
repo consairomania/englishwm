@@ -370,25 +370,7 @@ export async function clearQuestContent(sessionId: string): Promise<void> {
 }
 
 // ─── Time Travel ───────────────────────────────────────────────────────────────
-export async function generateTimeTravelContent(
-  sessionId: string,
-  level: string,
-  topic?: string,
-  tenses?: string[],
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
-): Promise<{ data: TimeTravelData; chosenTopic: string }> {
-  const genAI = getGenAI();
-
-  const hasTenseFilter = tenses && tenses.length > 0;
-  const tenseConstraint = hasTenseFilter
-    ? `Distribute the 15 exercises RANDOMLY across only these tenses/structures: ${tenses!.join(', ')}.`
-    : 'Vary the tenses freely across all 15 exercises (use a wide mix of different tenses).';
-
-  const topicConstraint = topic
-    ? `All sentences must relate to this topic or scenario: "${topic}".`
-    : 'Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".';
-
-  const specialStructureInstructions = `
+const TT_SPECIAL_STRUCTURE_INSTRUCTIONS = `
 Special structure guidance (apply when the selected tenses/structures include these):
 - MODAL VERBS (Should/Would/Can/Could/May/Might/Must/Have to/Need to/Used to): Use ONE blank. Options must be 4 different modals or modal phrases (e.g. "should", "must", "might", "could") — the correct one fits the context (advice, obligation, possibility, habit). Example: "You ___ see a doctor." → options: ["should", "would", "might", "used to"]
 - MODAL + PRESENT PERFECT: Use TWO blanks — modal + "have" + past participle (e.g. "should have gone"). Options: 4 different modals before "have ___". Example: "She ___ ___ earlier." → options: ["should have left", "must have left", "could have left", "would have left"]
@@ -398,12 +380,34 @@ Special structure guidance (apply when the selected tenses/structures include th
 - HAD BETTER: Use ONE blank with options: "had better", "should", "must", "ought to". Example: "You ___ leave now." → correct: "had better"
 - STATIVE VERBS (know, love, understand, believe, want, need, seem, own, etc.): Test that stative verbs are NOT used in continuous form. Correct option: present simple. Distractors: present continuous, present perfect, past simple. Example: "She ___ the answer." → options: ["knows", "is knowing", "has known", "knew"] → correct: "knows"`;
 
+export async function generateTimeTravelContent(
+  sessionId: string,
+  level: string,
+  topic?: string,
+  tenses?: string[],
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  count: number = 15
+): Promise<{ data: TimeTravelData; chosenTopic: string }> {
+  const genAI = getGenAI();
+  const n = Math.max(1, Math.min(15, count));
+
+  const hasTenseFilter = tenses && tenses.length > 0;
+  const tenseConstraint = hasTenseFilter
+    ? `Distribute the ${n} exercises RANDOMLY across only these tenses/structures: ${tenses!.join(', ')}.`
+    : `Vary the tenses freely across all ${n} exercises (use a wide mix of different tenses).`;
+
+  const topicConstraint = topic
+    ? `All sentences must relate to this topic or scenario: "${topic}".`
+    : 'Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".';
+
+  const specialStructureInstructions = TT_SPECIAL_STRUCTURE_INSTRUCTIONS;
+
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
     systemInstruction: `You are an Expert English Grammar Teacher creating verb tense and grammar exercises for CEFR level ${level}.
 ${getAgeInstruction(ageSegment)}
 
-Generate exactly 15 sentence exercises and return a JSON object with this structure:
+Generate exactly ${n} sentence exercises and return a JSON object with this structure:
 {
   "chosen_topic": "At the airport",
   "exercises": [
@@ -430,7 +434,7 @@ ${specialStructureInstructions}`,
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
   const prompt = [
-    'Generate 15 verb tense exercises.',
+    `Generate ${n} verb tense exercises.`,
     hasTenseFilter ? `Tenses to use: ${tenses!.join(', ')}.` : '',
     topic ? `Topic: ${topic}.` : '',
   ].filter(Boolean).join(' ');
@@ -451,6 +455,86 @@ ${specialStructureInstructions}`,
 
 export async function clearTimeTravelContent(sessionId: string): Promise<void> {
   await mergeExerciseData(sessionId, { time_travel_data: null, student_time_travel_answers: null });
+}
+
+export async function regenerateTimeTravelItem(
+  sessionId: string,
+  itemIndex: number,
+  level: string,
+  topic?: string,
+  tenses?: string[],
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+): Promise<void> {
+  const genAI = getGenAI();
+
+  const hasTenseFilter = tenses && tenses.length > 0;
+  const tenseConstraint = hasTenseFilter
+    ? `Use only these tenses/structures: ${tenses!.join(', ')}.`
+    : 'Use any appropriate tense or structure.';
+  const topicConstraint = topic
+    ? `The sentence must relate to this topic: "${topic}".`
+    : 'Pick an interesting, varied topic for this sentence.';
+
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an Expert English Grammar Teacher creating a single verb tense exercise for CEFR level ${level}.
+${getAgeInstruction(ageSegment)}
+
+Generate exactly 1 sentence exercise and return a JSON object with this structure:
+{
+  "chosen_topic": "At the airport",
+  "exercises": [
+    {
+      "sentence_en": "She ___ to Paris last year.",
+      "sentence_ro": "Ea a mers la Paris anul trecut.",
+      "options": ["go", "went", "has gone", "will go"],
+      "correct_index": 1
+    }
+  ]
+}
+
+Rules:
+- sentence_en: Use one blank ___ for single-word answers. For multi-word answers, use TWO blanks.
+- sentence_ro: Complete Romanian translation (with the correct verb form, NOT a blank)
+- options: exactly 4 plausible verb forms or structures; only one is correct
+- correct_index: integer 0–3
+- ${tenseConstraint}
+- ${topicConstraint}
+- Level-appropriate vocabulary and sentence complexity for ${level}
+${TT_SPECIAL_STRUCTURE_INSTRUCTIONS}`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.95 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const prompt = [
+    'Generate 1 verb tense exercise.',
+    hasTenseFilter ? `Tenses to use: ${tenses!.join(', ')}.` : '',
+    topic ? `Topic: ${topic}.` : '',
+  ].filter(Boolean).join(' ');
+
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const parsed = TimeTravelSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    console.error('[TimeTravelItem] Schema validation failed:', parsed.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const newItem = parsed.data.exercises[0];
+
+  const { data: cur } = await supabase
+    .from('session_state')
+    .select('exercise_data')
+    .eq('session_id', sessionId)
+    .maybeSingle();
+
+  const ex =
+    typeof cur?.exercise_data === 'object' && cur.exercise_data !== null
+      ? (cur.exercise_data as Record<string, unknown>)
+      : {};
+
+  const currentData = Array.isArray(ex.time_travel_data) ? [...ex.time_travel_data] : [];
+  currentData[itemIndex] = newItem;
+
+  await mergeExerciseData(sessionId, { time_travel_data: currentData });
 }
 
 // ─── Student Notes ─────────────────────────────────────────────────────────────
