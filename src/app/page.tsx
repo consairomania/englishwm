@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   User,
   Trophy,
@@ -9,6 +9,7 @@ import {
   BookOpen,
   Loader2,
   ChevronRight,
+  ChevronLeft,
   Puzzle as PuzzleIcon,
   Target,
   Zap,
@@ -87,8 +88,8 @@ import {
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 import { saveSessionLog, getSessionLogs, getAllRecentSessionLogs } from '@/app/actions/sessionActions';
-import { createHomework, getTeacherHomework } from '@/app/actions/homework';
-import type { HomeworkAssignment } from '@/types/database';
+import { createHomework, getTeacherHomework, getStudentHomework, deleteHomework } from '@/app/actions/homework';
+import type { HomeworkAssignment, DraftHomework, DraftHomeworkItem } from '@/types/database';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const teacherPhoto =
@@ -341,6 +342,8 @@ function TeacherHome({
   const [dashboardLoading, setDashboardLoading] = useState(false);
   const [homeworkList, setHomeworkList] = useState<HomeworkAssignment[]>([]);
   const [homeworkLoading, setHomeworkLoading] = useState(false);
+  const [expandedHwId, setExpandedHwId] = useState<string | null>(null);
+  const [deletingHwId, setDeletingHwId] = useState<string | null>(null);
 
   useEffect(() => {
     getAllStudents().then((data) => {
@@ -365,6 +368,18 @@ function TeacherHome({
     const list = await getTeacherHomework('medea');
     setHomeworkList(list);
     setHomeworkLoading(false);
+  };
+
+  const handleDeleteHomework = async (id: string) => {
+    setDeletingHwId(id);
+    try {
+      await deleteHomework(id);
+      setHomeworkList((prev) => prev.filter((h) => h.id !== id));
+      if (expandedHwId === id) setExpandedHwId(null);
+    } catch (e) {
+      console.error('[Homework] delete error', e);
+    }
+    setDeletingHwId(null);
   };
 
   const handleAdd = async () => {
@@ -625,12 +640,7 @@ function TeacherHome({
                 <p className="text-3xl">📭</p>
                 <p className="text-sm font-bold text-slate-500">Nicio temă trimisă încă.</p>
                 <p className="text-xs text-slate-400">Folosește butonul 📤 din sesiune pentru a trimite exerciții ca temă.</p>
-                <a
-                  href="/homework"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="inline-flex items-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-2 hover:underline"
-                >
+                <a href="/homework" target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-2 hover:underline">
                   <ExternalLink size={11} /> Pagina elevului: /homework
                 </a>
               </div>
@@ -648,62 +658,116 @@ function TeacherHome({
                   </button>
                 </div>
                 {homeworkList.map((hw) => {
-                  const student = students.find((s) => s.id === hw.student_id);
+                  const hwStudent = students.find((s) => s.id === hw.student_id);
                   const moduleIcons: Record<string, string> = { tense_arena: '⏰', puzzle: '🧩', dictation: '🎙️', writing: '✍️' };
+                  const isExpanded = expandedHwId === hw.id;
+                  const ex = hw.exercises as Record<string, unknown>;
                   return (
-                    <div key={hw.id} className="bg-white rounded-[20px] px-5 py-4 shadow-lg border border-slate-50 space-y-2">
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="font-black text-slate-800 text-sm">{student?.name ?? 'Elev necunoscut'}</p>
-                          <p className="text-[9px] text-slate-400 uppercase tracking-widest font-bold">{hw.created_at.slice(0, 10)}</p>
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${hw.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {hw.completed ? '✓ Rezolvată' : '⏳ Aștept...'}
-                          </span>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3 flex-wrap">
-                        <div className="flex items-center gap-1 bg-slate-900 text-white rounded-lg px-3 py-1">
-                          <span className="font-black text-sm tracking-widest">{hw.code}</span>
-                          <button
-                            onClick={() => navigator.clipboard.writeText(hw.code)}
-                            className="text-slate-400 hover:text-white transition-colors ml-1"
-                          >
-                            <Copy size={11} />
-                          </button>
-                        </div>
-                        <div className="flex gap-1">
-                          {hw.modules.map((m) => (
-                            <span key={m} className="text-sm" title={m}>{moduleIcons[m] ?? '📚'}</span>
-                          ))}
-                        </div>
-                        {hw.completed && (
-                          <span className="text-xs font-black text-violet-700 ml-auto">+{hw.xp_earned} XP</span>
-                        )}
-                      </div>
-                      {hw.completed && typeof hw.student_answers === 'object' && hw.student_answers !== null && (() => {
-                        const ans = hw.student_answers as Record<string, unknown>;
-                        const ttScore = ans.time_travel_score as string | undefined;
-                        const puzzleCorrect = ans.puzzle_correct as boolean | undefined;
-                        const writingFb = ans.writing_feedback as { score?: number } | undefined;
-                        return (
-                          <div className="flex flex-wrap gap-1.5 pt-1">
-                            {ttScore && <span className="text-[9px] bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg px-2 py-0.5 font-bold">⏰ {ttScore}</span>}
-                            {puzzleCorrect !== undefined && <span className={`text-[9px] rounded-lg px-2 py-0.5 font-bold border ${puzzleCorrect ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>🧩 {puzzleCorrect ? 'OK' : 'Greșit'}</span>}
-                            {writingFb?.score !== undefined && <span className="text-[9px] bg-violet-50 border border-violet-100 text-violet-700 rounded-lg px-2 py-0.5 font-bold">✍️ {writingFb.score}/100</span>}
+                    <div key={hw.id} className="bg-white rounded-[20px] shadow-lg border border-slate-50 overflow-hidden">
+                      {/* ── Header card (clickabil pentru expand) ── */}
+                      <div
+                        className="px-5 py-4 space-y-2 cursor-pointer hover:bg-slate-50 transition-colors"
+                        onClick={() => setExpandedHwId(isExpanded ? null : hw.id)}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-black text-slate-800 text-sm">{hwStudent?.name ?? 'Elev necunoscut'}</p>
+                            <p className="text-[9px] text-slate-400 uppercase tracking-widest font-bold">{hw.created_at.slice(0, 10)}</p>
                           </div>
-                        );
-                      })()}
+                          <div className="flex items-center gap-2">
+                            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${hw.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {hw.completed ? '✓ Rezolvată' : '⏳ Aștept...'}
+                            </span>
+                            <button
+                              onClick={(e) => { e.stopPropagation(); handleDeleteHomework(hw.id); }}
+                              disabled={deletingHwId === hw.id}
+                              className="p-1.5 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all disabled:opacity-40"
+                              title="Șterge tema"
+                            >
+                              {deletingHwId === hw.id ? <Loader2 size={13} className="animate-spin" /> : <Trash2 size={13} />}
+                            </button>
+                            {isExpanded ? <ChevronUp size={13} className="text-slate-400 shrink-0" /> : <ChevronDown size={13} className="text-slate-400 shrink-0" />}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 flex-wrap">
+                          <div className="flex items-center gap-1 bg-slate-900 text-white rounded-lg px-3 py-1" onClick={(e) => e.stopPropagation()}>
+                            <span className="font-black text-sm tracking-widest">{hw.code}</span>
+                            <button onClick={() => navigator.clipboard.writeText(hw.code)} className="text-slate-400 hover:text-white transition-colors ml-1">
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                          <div className="flex gap-1">
+                            {hw.modules.map((m) => <span key={m} className="text-sm" title={m}>{moduleIcons[m] ?? '📚'}</span>)}
+                          </div>
+                          {hw.completed && <span className="text-xs font-black text-violet-700 ml-auto">+{hw.xp_earned} XP</span>}
+                        </div>
+                        {/* Scoruri rezumat */}
+                        {hw.completed && typeof hw.student_answers === 'object' && hw.student_answers !== null && (() => {
+                          const ans = hw.student_answers as Record<string, unknown>;
+                          const ttScore = ans.time_travel_score as string | undefined;
+                          const puzzleCorrect = ans.puzzle_correct as boolean | undefined;
+                          const writingFb = ans.writing_feedback as { score?: number } | undefined;
+                          return (
+                            <div className="flex flex-wrap gap-1.5 pt-1">
+                              {ttScore && <span className="text-[9px] bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg px-2 py-0.5 font-bold">⏰ {ttScore}</span>}
+                              {puzzleCorrect !== undefined && <span className={`text-[9px] rounded-lg px-2 py-0.5 font-bold border ${puzzleCorrect ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>🧩 {puzzleCorrect ? 'OK' : 'Greșit'}</span>}
+                              {writingFb?.score !== undefined && <span className="text-[9px] bg-violet-50 border border-violet-100 text-violet-700 rounded-lg px-2 py-0.5 font-bold">✍️ {writingFb.score}/100</span>}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                      {/* ── Conținut expandat ── */}
+                      {isExpanded && (
+                        <div className="border-t border-slate-100 px-5 py-4 bg-slate-50 space-y-3">
+                          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Conținut temă</p>
+                          {Array.isArray(ex.time_travel_data) && ex.time_travel_data.length > 0 && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-indigo-600">⏰ Time Travel — {(ex.time_travel_data as unknown[]).length} întrebări</p>
+                              <p className="text-[10px] text-slate-500 italic">„{((ex.time_travel_data as Record<string,unknown>[])[0]?.sentence_en as string) ?? ''}..."</p>
+                            </div>
+                          )}
+                          {!!(ex.puzzle_data && (ex.puzzle_data as Record<string,unknown>).sentence) && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-purple-600">🧩 Puzzle</p>
+                              <p className="text-[10px] text-slate-500 italic">„{(ex.puzzle_data as Record<string,unknown>).sentence as string}"</p>
+                            </div>
+                          )}
+                          {!!(ex.dictation_data && (ex.dictation_data as Record<string,unknown>).sentence_en) && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-rose-600">🎙️ Dictation</p>
+                              <p className="text-[10px] text-slate-500 italic">„{(ex.dictation_data as Record<string,unknown>).sentence_en as string}"</p>
+                            </div>
+                          )}
+                          {!!(ex.writing_data && (ex.writing_data as Record<string,unknown>).prompt_en) && (
+                            <div className="space-y-1">
+                              <p className="text-[10px] font-black text-violet-600">✍️ Writing</p>
+                              <p className="text-[10px] text-slate-500 italic">„{(ex.writing_data as Record<string,unknown>).prompt_en as string}"</p>
+                            </div>
+                          )}
+                          {/* Răspunsurile elevului dacă rezolvată */}
+                          {hw.completed && typeof hw.student_answers === 'object' && hw.student_answers !== null && (() => {
+                            const ans = hw.student_answers as Record<string, unknown>;
+                            const puzzleAnswer = ans.puzzle_answer as string | undefined;
+                            const dictAnswer = ans.dictation_answer as string | undefined;
+                            const writingAnswer = ans.writing_answer as string | undefined;
+                            const writingFb = ans.writing_feedback as { feedback_ro?: string } | undefined;
+                            if (!puzzleAnswer && !dictAnswer && !writingAnswer) return null;
+                            return (
+                              <div className="border-t border-slate-200 pt-3 space-y-2">
+                                <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Răspunsurile elevului</p>
+                                {puzzleAnswer && <p className="text-[10px] text-slate-600">🧩 <span className="font-bold">Puzzle:</span> „{puzzleAnswer}"</p>}
+                                {dictAnswer && <p className="text-[10px] text-slate-600">🎙️ <span className="font-bold">Dictare:</span> „{dictAnswer}"</p>}
+                                {writingAnswer && <p className="text-[10px] text-slate-600">✍️ <span className="font-bold">Writing:</span> „{writingAnswer.slice(0, 120)}{writingAnswer.length > 120 ? '...' : ''}"</p>}
+                                {writingFb?.feedback_ro && <p className="text-[10px] text-violet-600 italic">{writingFb.feedback_ro.slice(0, 200)}{writingFb.feedback_ro.length > 200 ? '...' : ''}</p>}
+                              </div>
+                            );
+                          })()}
+                        </div>
+                      )}
                     </div>
                   );
                 })}
-                <a
-                  href="/homework"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest py-2 hover:underline"
-                >
+                <a href="/homework" target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest py-2 hover:underline">
                   <ExternalLink size={11} /> Pagina elevului: /homework
                 </a>
               </>
@@ -1306,6 +1370,7 @@ function DashboardView({
   onResetXp,
   onAdjustSkill,
   onGoToPortfolio,
+  onGoToHomework,
 }: {
   student: Student;
   vocabularyLoot: string[];
@@ -1316,6 +1381,7 @@ function DashboardView({
   onResetXp?: () => void;
   onAdjustSkill?: (skill: keyof Student['skills'], delta: number) => void;
   onGoToPortfolio?: () => void;
+  onGoToHomework?: () => void;
 }) {
   const xpPercent = Math.min((student.xp / student.nextLevelXp) * 100, 100);
   const activities = [
@@ -1327,13 +1393,25 @@ function DashboardView({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto px-4 pb-24">
-      {isTeacher && onGoToPortfolio && (
-        <button
-          onClick={onGoToPortfolio}
-          className="flex items-center gap-2 text-slate-400 hover:text-pink-600 transition-colors font-black text-xs uppercase tracking-widest"
-        >
-          <Users size={13} /> Portofoliu elevi
-        </button>
+      {isTeacher && (
+        <div className="flex items-center gap-4 flex-wrap">
+          {onGoToPortfolio && (
+            <button
+              onClick={onGoToPortfolio}
+              className="flex items-center gap-2 text-slate-400 hover:text-pink-600 transition-colors font-black text-xs uppercase tracking-widest"
+            >
+              <Users size={13} /> Portofoliu elevi
+            </button>
+          )}
+          {onGoToHomework && (
+            <button
+              onClick={onGoToHomework}
+              className="flex items-center gap-2 text-slate-400 hover:text-emerald-600 transition-colors font-black text-xs uppercase tracking-widest"
+            >
+              <BookOpen size={13} /> Teme
+            </button>
+          )}
+        </div>
       )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-linear-to-br from-pink-600 to-pink-800 rounded-[30px] p-6 text-white shadow-xl relative overflow-hidden flex flex-col justify-between min-h-[180px]">
@@ -3092,22 +3170,219 @@ function WritingFeedbackCard({ feedback }: { feedback: WritingFeedback }) {
   );
 }
 
+// ─── Homework Review Overlay ──────────────────────────────────────────────────
+function HomeworkReviewOverlay({ data, onClose }: { data: { code: string; modules: string[]; exercises: Record<string, unknown> }; onClose?: () => void }) {
+  const [page, setPage] = useState(0);
+  const ex = data.exercises;
+
+  const sections: { key: string; label: string; icon: string; content: React.ReactNode }[] = [];
+
+  // Format nou: exercises.items este un array de DraftHomeworkItem
+  if (Array.isArray(ex.items)) {
+    const items = ex.items as DraftHomeworkItem[];
+    items.forEach((item, idx) => {
+      const d = item.data as Record<string, unknown>;
+      if (item.type === 'time_travel' && Array.isArray(item.data)) {
+        const ttItems = item.data as { sentence_en: string; sentence_ro: string; options: string[]; correct_index: number }[];
+        sections.push({
+          key: `tt_${idx}`, label: item.label, icon: '⏰',
+          content: (
+            <div className="space-y-3">
+              {ttItems.map((q, i) => (
+                <div key={i} className="bg-white/10 rounded-xl p-3 space-y-2">
+                  <p className="text-xs font-black text-white">{i + 1}. {q.sentence_en.replace('___', '______')}</p>
+                  <p className="text-[10px] text-white/60 italic">{q.sentence_ro}</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {q.options.map((opt, j) => (
+                      <span key={j} className={`text-[10px] px-2 py-1 rounded-lg font-bold ${j === q.correct_index ? 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/40' : 'bg-white/10 text-white/70'}`}>
+                        {opt}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          ),
+        });
+      } else if (item.type === 'puzzle' && d.sentence) {
+        sections.push({
+          key: `puzzle_${idx}`, label: item.label, icon: '🧩',
+          content: (
+            <div className="space-y-2">
+              <p className="text-sm font-black text-white leading-relaxed">„{d.sentence as string}"</p>
+              {!!d.sentence_ro && <p className="text-xs text-white/60 italic">{d.sentence_ro as string}</p>}
+            </div>
+          ),
+        });
+      } else if (item.type === 'dictation' && d.sentence_en) {
+        sections.push({
+          key: `dict_${idx}`, label: item.label, icon: '🎙️',
+          content: (
+            <div className="space-y-2">
+              <p className="text-sm font-black text-white">{d.sentence_en as string}</p>
+              {!!d.sentence_ro && <p className="text-xs text-white/60 italic">{d.sentence_ro as string}</p>}
+              {!!d.hint_ro && <p className="text-[10px] text-amber-300">💡 {d.hint_ro as string}</p>}
+            </div>
+          ),
+        });
+      } else if (item.type === 'writing' && d.prompt_en) {
+        sections.push({
+          key: `writing_${idx}`, label: item.label, icon: '✍️',
+          content: (
+            <div className="space-y-2">
+              <p className="text-sm font-black text-white">{d.prompt_en as string}</p>
+              {!!d.prompt_ro && <p className="text-xs text-white/60 italic">{d.prompt_ro as string}</p>}
+            </div>
+          ),
+        });
+      }
+    });
+  } else {
+    // Format vechi: dict cu chei puzzle_data, time_travel_data, etc.
+    if (Array.isArray(ex.time_travel_data) && (ex.time_travel_data as unknown[]).length > 0) {
+      const items = ex.time_travel_data as { sentence_en: string; sentence_ro: string; options: string[]; correct_index: number }[];
+      sections.push({
+        key: 'tense_arena', label: 'Time Travel', icon: '⏰',
+        content: (
+          <div className="space-y-3">
+            {items.map((item, i) => (
+              <div key={i} className="bg-white/10 rounded-xl p-3 space-y-2">
+                <p className="text-xs font-black text-white">{i + 1}. {item.sentence_en.replace('___', '______')}</p>
+                <p className="text-[10px] text-white/60 italic">{item.sentence_ro}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {item.options.map((opt, j) => (
+                    <span key={j} className={`text-[10px] px-2 py-1 rounded-lg font-bold ${j === item.correct_index ? 'bg-emerald-500/30 text-emerald-200 border border-emerald-400/40' : 'bg-white/10 text-white/70'}`}>
+                      {opt}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ),
+      });
+    }
+    if (ex.puzzle_data && (ex.puzzle_data as Record<string, unknown>).sentence) {
+      const p = ex.puzzle_data as Record<string, unknown>;
+      sections.push({
+        key: 'puzzle', label: 'Puzzle', icon: '🧩',
+        content: (
+          <div className="space-y-2">
+            <p className="text-sm font-black text-white leading-relaxed">„{p.sentence as string}"</p>
+            {!!p.translation_ro && <p className="text-xs text-white/60 italic">{p.translation_ro as string}</p>}
+          </div>
+        ),
+      });
+    }
+    if (ex.dictation_data && (ex.dictation_data as Record<string, unknown>).sentence_en) {
+      const d = ex.dictation_data as Record<string, unknown>;
+      sections.push({
+        key: 'dictation', label: 'Dictare', icon: '🎙️',
+        content: (
+          <div className="space-y-2">
+            <p className="text-sm font-black text-white">{d.sentence_en as string}</p>
+            {!!d.sentence_ro && <p className="text-xs text-white/60 italic">{d.sentence_ro as string}</p>}
+            {!!d.hint_ro && <p className="text-[10px] text-amber-300">💡 {d.hint_ro as string}</p>}
+          </div>
+        ),
+      });
+    }
+    if (ex.writing_data && (ex.writing_data as Record<string, unknown>).prompt_en) {
+      const w = ex.writing_data as Record<string, unknown>;
+      sections.push({
+        key: 'writing', label: 'Writing', icon: '✍️',
+        content: (
+          <div className="space-y-2">
+            <p className="text-sm font-black text-white">{w.prompt_en as string}</p>
+            {!!w.prompt_ro && <p className="text-xs text-white/60 italic">{w.prompt_ro as string}</p>}
+          </div>
+        ),
+      });
+    }
+  }
+
+  if (sections.length === 0) return null;
+  const current = sections[Math.min(page, sections.length - 1)]!;
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/95 backdrop-blur-sm z-50 flex flex-col">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 border-b border-white/10">
+        <div className="flex items-center gap-3">
+          <span className="text-xl">📚</span>
+          <div>
+            <p className="text-xs font-black text-white uppercase tracking-widest">Revizuim tema împreună</p>
+            <p className="text-[9px] text-white/50 font-bold tracking-widest">COD: {data.code}</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="flex gap-1">
+            {sections.map((s, i) => (
+              <button
+                key={s.key}
+                onClick={() => setPage(i)}
+                className={`text-base p-1.5 rounded-lg transition-all ${i === page ? 'bg-white/20 scale-110' : 'opacity-50 hover:opacity-80'}`}
+                title={s.label}
+              >
+                {s.icon}
+              </button>
+            ))}
+          </div>
+          {onClose && (
+            <button onClick={onClose} className="p-1.5 rounded-lg bg-white/10 hover:bg-rose-500/30 text-white/70 hover:text-rose-200 transition-all ml-1" title="Închide review">
+              <X size={16} />
+            </button>
+          )}
+        </div>
+      </div>
+      {/* Content */}
+      <div className="flex-1 overflow-y-auto px-5 py-5">
+        <div className="flex items-center gap-2 mb-4">
+          <span className="text-lg">{current.icon}</span>
+          <p className="text-xs font-black text-white/70 uppercase tracking-widest">{current.label}</p>
+          <span className="text-[9px] text-white/30 ml-auto">{page + 1} / {sections.length}</span>
+        </div>
+        {current.content}
+      </div>
+      {/* Nav */}
+      {sections.length > 1 && (
+        <div className="flex gap-2 px-5 py-4 border-t border-white/10">
+          <button
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            disabled={page === 0}
+            className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest disabled:opacity-30 transition-all flex items-center justify-center gap-1"
+          >
+            <ChevronLeft size={14} /> Anterior
+          </button>
+          <button
+            onClick={() => setPage((p) => Math.min(sections.length - 1, p + 1))}
+            disabled={page === sections.length - 1}
+            className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 text-white rounded-xl font-black text-xs uppercase tracking-widest disabled:opacity-30 transition-all flex items-center justify-center gap-1"
+          >
+            Următor <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Teacher Control Panel ────────────────────────────────────────────────────
 function TeacherControlPanel({
   currentView,
   onChangeView,
   isSaving,
   roomCode,
-  onSendHomework,
-  homeworkSending,
+  onAddToDraft,
+  draftCount,
   hasExerciseData,
 }: {
   currentView: SessionState['current_view'];
   onChangeView: (view: SessionState['current_view']) => void;
   isSaving: boolean;
   roomCode: string;
-  onSendHomework?: () => void;
-  homeworkSending?: boolean;
+  onAddToDraft?: () => void;
+  draftCount?: number;
   hasExerciseData?: boolean;
 }) {
   const views = [
@@ -3119,6 +3394,7 @@ function TeacherControlPanel({
     { id: 'dictation' as const, label: 'DICT', icon: Mic },
     { id: 'writing' as const, label: 'WRITE', icon: PenLine },
   ];
+  const count = draftCount ?? 0;
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-[28px] px-5 py-3 shadow-2xl flex items-center gap-5 z-50">
       <div className="flex flex-col items-center shrink-0">
@@ -3140,15 +3416,20 @@ function TeacherControlPanel({
           </button>
         );
       })}
-      {onSendHomework && (
+      {onAddToDraft && (
         <button
-          onClick={onSendHomework}
-          disabled={!hasExerciseData || homeworkSending || isSaving}
-          className="flex flex-col items-center gap-0.5 transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 text-emerald-600 hover:text-emerald-700"
-          title="Trimite ca temă"
+          onClick={onAddToDraft}
+          disabled={!hasExerciseData || count >= 10 || isSaving}
+          className="flex flex-col items-center gap-0.5 transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 text-emerald-600 hover:text-emerald-700 relative"
+          title={count >= 10 ? 'Tema are deja 10 exerciții (maxim)' : 'Adaugă la temă'}
         >
-          {homeworkSending ? <Loader2 size={20} className="animate-spin" /> : <BookOpen size={20} />}
+          <BookOpen size={20} />
           <span className="font-black uppercase text-[7px] tracking-widest">TEMĂ</span>
+          {count > 0 && (
+            <span className="absolute -top-1.5 -right-1.5 bg-emerald-500 text-white text-[8px] font-black rounded-full w-4 h-4 flex items-center justify-center leading-none">
+              {count}
+            </span>
+          )}
         </button>
       )}
       {isSaving && <Loader2 size={14} className="animate-spin text-pink-400 shrink-0" />}
@@ -3205,6 +3486,162 @@ function DebugPanel({ errors }: { errors: DebugError[] }) {
   );
 }
 
+// ─── Homework Portfolio View ──────────────────────────────────────────────────
+function HomeworkPortfolioView({
+  isTeacher,
+  draft,
+  studentName,
+  homeworks,
+  loading,
+  onBack,
+  onRemoveDraftItem,
+  onSendDraft,
+  onReviewHomework,
+}: {
+  isTeacher: boolean;
+  draft: DraftHomework | null;
+  studentName?: string;
+  homeworks: HomeworkAssignment[];
+  loading: boolean;
+  onBack: () => void;
+  onRemoveDraftItem: (idx: number) => void;
+  onSendDraft: () => void;
+  onReviewHomework: (hw: HomeworkAssignment) => void;
+}) {
+  const moduleIcons: Record<string, string> = { tense_arena: '⏰', puzzle: '🧩', dictation: '🎙️', writing: '✍️' };
+  const draftItems = draft?.items ?? [];
+
+  return (
+    <div className="max-w-2xl mx-auto px-4 pb-28 pt-2 space-y-5">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <button
+          onClick={onBack}
+          className="p-2 rounded-xl bg-white/80 hover:bg-slate-100 border border-slate-100 text-slate-500 hover:text-slate-700 transition-all shadow-sm"
+          title="Înapoi la dashboard"
+        >
+          <ChevronLeft size={16} />
+        </button>
+        <div>
+          <h2 className="text-base font-black text-slate-800 uppercase tracking-widest flex items-center gap-2">
+            <BookOpen size={16} className="text-emerald-600" />
+            {isTeacher ? `Teme — ${studentName ?? 'Elev'}` : 'Temele mele'}
+          </h2>
+          {isTeacher && <p className="text-[9px] text-slate-400 font-bold uppercase tracking-widest mt-0.5">Draft curent + teme trimise</p>}
+        </div>
+      </div>
+
+      {/* TEACHER: Draft curent */}
+      {isTeacher && (
+        <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-100 space-y-3">
+          <div className="flex items-center justify-between">
+            <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2">
+              <Pencil size={12} className="text-emerald-500" /> Draft curent
+            </h3>
+            <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${draftItems.length >= 10 ? 'bg-rose-100 text-rose-600' : 'bg-emerald-50 text-emerald-600'}`}>
+              {draftItems.length}/10 exerciții
+            </span>
+          </div>
+
+          {draftItems.length === 0 ? (
+            <div className="text-center py-4 space-y-1">
+              <p className="text-2xl">📝</p>
+              <p className="text-xs font-bold text-slate-400">Niciun exercițiu adăugat încă.</p>
+              <p className="text-[10px] text-slate-300">Navighează la Puzzle, Time Travel, Dictare sau Writing și apasă butonul <span className="font-black">TEMĂ</span> din bara de jos.</p>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {draftItems.map((item, idx) => (
+                <div key={idx} className="flex items-center gap-3 px-3 py-2 bg-emerald-50 rounded-xl border border-emerald-100">
+                  <span className="text-base">{moduleIcons[item.type === 'time_travel' ? 'tense_arena' : item.type] ?? '📚'}</span>
+                  <span className="flex-1 text-xs font-black text-slate-700">{item.label}</span>
+                  <span className="text-[9px] text-slate-400">{item.added_at.slice(11, 16)}</span>
+                  <button
+                    onClick={() => onRemoveDraftItem(idx)}
+                    className="p-1 rounded-lg text-slate-300 hover:text-rose-500 hover:bg-rose-50 transition-all"
+                    title="Elimină din draft"
+                  >
+                    <X size={12} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {draftItems.length > 0 && (
+            <button
+              onClick={onSendDraft}
+              className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black text-xs uppercase tracking-widest transition-all flex items-center justify-center gap-2 shadow-md"
+            >
+              <Send size={13} /> Trimite tema ({draftItems.length} {draftItems.length === 1 ? 'exercițiu' : 'exerciții'})
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* STUDENT: Draft în construcție */}
+      {!isTeacher && draftItems.length > 0 && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-[20px] p-4 flex items-center gap-3">
+          <span className="text-xl">🔨</span>
+          <div>
+            <p className="text-xs font-black text-emerald-700">Profesorul construiește o temă</p>
+            <p className="text-[10px] text-emerald-500">{draftItems.length} {draftItems.length === 1 ? 'exercițiu adăugat' : 'exerciții adăugate'} până acum</p>
+          </div>
+        </div>
+      )}
+
+      {/* Teme trimise */}
+      <div className="space-y-3">
+        <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em] flex items-center gap-2 px-1">
+          <BookOpen size={12} /> {isTeacher ? 'Teme trimise' : 'Temele mele'}
+        </h3>
+        {loading ? (
+          <div className="flex justify-center py-8">
+            <Loader2 className="animate-spin text-emerald-400" size={22} />
+          </div>
+        ) : homeworks.length === 0 ? (
+          <div className="bg-white rounded-[20px] p-6 text-center shadow-sm border border-slate-50">
+            <p className="text-2xl mb-1">📭</p>
+            <p className="text-sm font-bold text-slate-400">{isTeacher ? 'Nicio temă trimisă pentru acest elev.' : 'Nu ai nicio temă primită.'}</p>
+          </div>
+        ) : (
+          <div className="space-y-2.5">
+            {homeworks.map((hw) => (
+              <div
+                key={hw.id}
+                className="bg-white rounded-[20px] p-4 shadow-sm border border-slate-50 space-y-2.5"
+              >
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${hw.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {hw.completed ? '✓ Rezolvată' : '⏳ În așteptare'}
+                  </span>
+                  <span className="text-xs font-black text-slate-500 tracking-widest bg-slate-100 px-2 py-0.5 rounded-lg">{hw.code}</span>
+                  <span className="text-[9px] text-slate-400">{hw.created_at.slice(0, 10)}</span>
+                  <div className="flex gap-0.5 ml-auto">
+                    {(Array.isArray((hw.exercises as Record<string,unknown>)?.items)
+                      ? [...new Set((hw.exercises as { items: DraftHomeworkItem[] }).items.map(i => i.type === 'time_travel' ? 'tense_arena' : i.type))]
+                      : hw.modules
+                    ).map((m) => <span key={m} className="text-sm" title={m}>{moduleIcons[m] ?? '📚'}</span>)}
+                  </div>
+                  {hw.completed && <span className="text-[9px] font-black text-violet-600">+{hw.xp_earned} XP</span>}
+                </div>
+                {isTeacher && (
+                  <button
+                    onClick={() => onReviewHomework(hw)}
+                    className="w-full py-2 bg-slate-100 hover:bg-emerald-50 hover:text-emerald-700 text-slate-500 rounded-xl font-black text-[10px] uppercase tracking-widest transition-all flex items-center justify-center gap-1.5"
+                  >
+                    <Eye size={12} /> Revizuiește cu elevul
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── Root Page ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [screen, setScreen] = useState<AppScreen>('restoring');
@@ -3212,6 +3649,12 @@ export default function DashboardPage() {
   const [homeworkCode, setHomeworkCode] = useState<string | null>(null);
   const [homeworkSending, setHomeworkSending] = useState(false);
   const [hwCopied, setHwCopied] = useState(false);
+  const [showDraftPreview, setShowDraftPreview] = useState(false);
+  const [draftToast, setDraftToast] = useState<string | null>(null);
+  const [studentHomeworkList, setStudentHomeworkList] = useState<HomeworkAssignment[]>([]);
+  const [studentHomeworkLoading, setStudentHomeworkLoading] = useState(false);
+  const [_reviewingHomework, setReviewingHomework] = useState<HomeworkAssignment | null>(null);
+  const prevDraftLengthRef = useRef(0);
   const [isTeacher, setIsTeacher] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
@@ -3465,7 +3908,7 @@ export default function DashboardPage() {
   // Server Action se ocupă de Supabase — aici actualizăm doar starea locală a profesorului
   // (elevul primește update via Realtime automat)
   const handlePuzzleGenerated = useCallback(
-    (data: PuzzleData | null) => {
+    (_data: PuzzleData | null) => {
       // Starea locală pentru profesor se va actualiza prin liveState (Realtime)
       // Nu mai e nevoie de update manual Supabase — generatePuzzleContent / clearPuzzleContent se ocupă
     },
@@ -3807,6 +4250,54 @@ export default function DashboardPage() {
     }
   }, [student]);
 
+  // ── Fetch teme elev curent (profesor in sesiune) ─────────────────────────────
+  const fetchStudentHomework = useCallback(async () => {
+    if (!student?.dbId) return;
+    setStudentHomeworkLoading(true);
+    const list = await getStudentHomework(student.dbId);
+    setStudentHomeworkList(list);
+    setStudentHomeworkLoading(false);
+  }, [student?.dbId]);
+
+  useEffect(() => {
+    if (isTeacher && currentView === 'homework_portfolio' && student?.dbId) {
+      fetchStudentHomework();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isTeacher, currentView, student?.dbId]);
+
+  // Toast pentru elev când profesorul adaugă la draft
+  const draftItems = (effectiveState?.exercise_data?.draft_homework as DraftHomework | undefined)?.items;
+  const draftLen = draftItems?.length ?? 0;
+  useEffect(() => {
+    if (isTeacher) { prevDraftLengthRef.current = draftLen; return; }
+    const prevLen = prevDraftLengthRef.current;
+    prevDraftLengthRef.current = draftLen;
+    if (draftLen > prevLen) {
+      const last = draftItems?.[draftLen - 1];
+      if (last) {
+        setDraftToast(`${last.label} adăugat la temă! (${draftLen}/10)`);
+        const t = setTimeout(() => setDraftToast(null), 3500);
+        return () => clearTimeout(t);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draftLen]);
+
+  // ── Review temă cu elevul (profesor → Realtime → elev) ───────────────────────
+  const handleReviewHomework = useCallback(async (hw: HomeworkAssignment | null) => {
+    if (!sessionId) return;
+    setReviewingHomework(hw);
+    const current = await supabase.from('session_state').select('exercise_data').eq('session_id', sessionId).maybeSingle();
+    const existing = (typeof current?.data?.exercise_data === 'object' && current.data.exercise_data !== null)
+      ? (current.data.exercise_data as Record<string, unknown>)
+      : {};
+    const patch = hw
+      ? { homework_review_data: { code: hw.code, modules: hw.modules, exercises: hw.exercises } }
+      : { homework_review_data: null };
+    await supabase.from('session_state').update({ exercise_data: { ...existing, ...patch } }).eq('session_id', sessionId);
+  }, [sessionId]);
+
   // ── Reset XP elev (profesor only) ────────────────────────────────────────────
   const resetXp = useCallback(async () => {
     if (!student?.dbId) return;
@@ -3815,31 +4306,65 @@ export default function DashboardPage() {
     await updateStudentProgress(student.dbId, 0, initialSkills);
   }, [student?.dbId]);
 
-  const handleSendHomework = useCallback(async () => {
-    if (!student || homeworkSending) return;
+  const handleAddToDraft = useCallback(async () => {
+    if (!sessionId) return;
+    const ex = (liveState ?? localSession)?.exercise_data ?? {};
+    const currentDraft = (ex.draft_homework as DraftHomework | undefined) ?? { items: [] };
+    if (currentDraft.items.length >= 10) return;
+    const cv = effectiveState?.current_view;
+    let newItem: DraftHomeworkItem | null = null;
+    const countOf = (type: string) => currentDraft.items.filter((i) => i.type === type).length + 1;
+    if (cv === 'puzzle' && ex.puzzle_data)
+      newItem = { type: 'puzzle', data: ex.puzzle_data, label: `🧩 Puzzle #${countOf('puzzle')}`, added_at: new Date().toISOString() };
+    else if (cv === 'tense_arena' && ex.time_travel_data)
+      newItem = { type: 'time_travel', data: ex.time_travel_data, label: `⏰ Time Travel #${countOf('time_travel')}`, added_at: new Date().toISOString() };
+    else if (cv === 'dictation' && ex.dictation_data)
+      newItem = { type: 'dictation', data: ex.dictation_data, label: `🎙️ Dictare #${countOf('dictation')}`, added_at: new Date().toISOString() };
+    else if (cv === 'writing' && ex.writing_data)
+      newItem = { type: 'writing', data: ex.writing_data, label: `✍️ Writing #${countOf('writing')}`, added_at: new Date().toISOString() };
+    if (!newItem) return;
+    const updatedDraft: DraftHomework = { items: [...currentDraft.items, newItem] };
+    const existing = typeof ex === 'object' && ex !== null ? ex : {};
+    await supabase.from('session_state').update({ exercise_data: { ...existing, draft_homework: updatedDraft } }).eq('session_id', sessionId);
+    setDraftToast(`${newItem.label} adăugat! (${updatedDraft.items.length}/10)`);
+    const t = setTimeout(() => setDraftToast(null), 3500);
+    return () => clearTimeout(t);
+  }, [sessionId, liveState, localSession, effectiveState]);
+
+  const handleRemoveDraftItem = useCallback(async (idx: number) => {
+    if (!sessionId) return;
+    const ex = (liveState ?? localSession)?.exercise_data ?? {};
+    const currentDraft = (ex.draft_homework as DraftHomework | undefined) ?? { items: [] };
+    const updatedItems = currentDraft.items.filter((_, i) => i !== idx);
+    const existing = typeof ex === 'object' && ex !== null ? ex : {};
+    await supabase.from('session_state').update({ exercise_data: { ...existing, draft_homework: { items: updatedItems } } }).eq('session_id', sessionId);
+  }, [sessionId, liveState, localSession]);
+
+  const handleSendDraft = useCallback(async () => {
+    if (!student || homeworkSending || !sessionId) return;
+    const ex = (liveState ?? localSession)?.exercise_data ?? {};
+    const draft = (ex.draft_homework as DraftHomework | undefined) ?? { items: [] };
+    if (draft.items.length === 0) return;
     setHomeworkSending(true);
     try {
-      const ex = localSession?.exercise_data ?? {};
-      const exercises: Record<string, unknown> = {};
-      const modules: string[] = [];
-      if (ex.time_travel_data) { exercises.time_travel_data = ex.time_travel_data; modules.push('tense_arena'); }
-      if (ex.puzzle_data) { exercises.puzzle_data = ex.puzzle_data; modules.push('puzzle'); }
-      if (ex.dictation_data) { exercises.dictation_data = ex.dictation_data; modules.push('dictation'); }
-      if (ex.writing_data) { exercises.writing_data = ex.writing_data; modules.push('writing'); }
-      exercises.level = student.level;
-      if (modules.length === 0) return;
+      const modules = [...new Set(draft.items.map((i) => i.type === 'time_travel' ? 'tense_arena' : i.type))];
       const { code } = await createHomework({
         studentId: student.dbId,
         teacherId: 'medea',
-        exercises,
+        exercises: { items: draft.items },
         modules,
       });
+      // Golește draft din session_state
+      const existing = typeof ex === 'object' && ex !== null ? ex : {};
+      await supabase.from('session_state').update({ exercise_data: { ...existing, draft_homework: { items: [] } } }).eq('session_id', sessionId);
       setHomeworkCode(code);
+      const list = await getStudentHomework(student.dbId);
+      setStudentHomeworkList(list);
     } catch (e) {
-      console.error('[Homework] create error', e);
+      console.error('[Homework] send draft error', e);
     }
     setHomeworkSending(false);
-  }, [student, localSession, homeworkSending]);
+  }, [student, homeworkSending, sessionId, liveState, localSession]);
 
   // Navigare unificată: profesor → update DB + Realtime; elev → navigare locală
   const handleNavigate = useCallback((view: SessionState['current_view']) => {
@@ -4070,6 +4595,20 @@ export default function DashboardPage() {
             onResetXp={isTeacher ? resetXp : undefined}
             onAdjustSkill={isTeacher ? adjustSkill : undefined}
             onGoToPortfolio={isTeacher ? () => { setPortfolioReturnScreen(screen); setScreen('teacher-home'); } : undefined}
+            onGoToHomework={isTeacher ? () => changeView('homework_portfolio') : undefined}
+          />
+        )}
+        {currentView === 'homework_portfolio' && (
+          <HomeworkPortfolioView
+            isTeacher={isTeacher}
+            draft={(effectiveState?.exercise_data?.draft_homework as DraftHomework | null) ?? null}
+            studentName={student.name}
+            homeworks={studentHomeworkList}
+            loading={studentHomeworkLoading}
+            onBack={() => changeView('dashboard')}
+            onRemoveDraftItem={handleRemoveDraftItem}
+            onSendDraft={() => setShowDraftPreview(true)}
+            onReviewHomework={handleReviewHomework}
           />
         )}
         {currentView === 'puzzle' && (
@@ -4168,17 +4707,79 @@ export default function DashboardPage() {
             onChangeView={changeView}
             isSaving={isSaving}
             roomCode={roomCode}
-            onSendHomework={handleSendHomework}
-            homeworkSending={homeworkSending}
-            hasExerciseData={!!(
-              localSession?.exercise_data?.time_travel_data ||
-              localSession?.exercise_data?.puzzle_data ||
-              localSession?.exercise_data?.dictation_data ||
-              localSession?.exercise_data?.writing_data
-            )}
+            onAddToDraft={(['puzzle', 'tense_arena', 'dictation', 'writing'] as SessionState['current_view'][]).includes(currentView) ? handleAddToDraft : undefined}
+            draftCount={(effectiveState?.exercise_data?.draft_homework as DraftHomework | undefined)?.items?.length ?? 0}
+            hasExerciseData={
+              (currentView === 'puzzle' && !!effectiveState?.exercise_data?.puzzle_data) ||
+              (currentView === 'tense_arena' && !!effectiveState?.exercise_data?.time_travel_data) ||
+              (currentView === 'dictation' && !!effectiveState?.exercise_data?.dictation_data) ||
+              (currentView === 'writing' && !!effectiveState?.exercise_data?.writing_data)
+            }
           />
           <DebugPanel errors={debugErrors} />
         </>
+      )}
+
+      {/* Homework review overlay — professor și elev */}
+      {(() => {
+        const reviewData = effectiveState?.exercise_data?.homework_review_data;
+        if (!reviewData || typeof reviewData !== 'object') return null;
+        const rd = reviewData as { code: string; modules: string[]; exercises: Record<string, unknown> };
+        return <HomeworkReviewOverlay data={rd} onClose={isTeacher ? () => handleReviewHomework(null) : undefined} />;
+      })()}
+
+      {/* Draft preview modal — confirmare trimitere */}
+      {showDraftPreview && (() => {
+        const draftItems = (effectiveState?.exercise_data?.draft_homework as DraftHomework | undefined)?.items ?? [];
+        return (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white rounded-[28px] p-7 max-w-sm w-full shadow-2xl space-y-5">
+              <div>
+                <h3 className="text-lg font-black uppercase italic tracking-tighter text-slate-800">Trimite tema</h3>
+                {student && <p className="text-xs text-slate-400 mt-0.5">pentru <span className="font-bold text-slate-600">{student.name}</span></p>}
+              </div>
+              {draftItems.length > 0 ? (
+                <div className="space-y-2">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Tema va conține {draftItems.length} {draftItems.length === 1 ? 'exercițiu' : 'exerciții'}:</p>
+                  {draftItems.map((item, idx) => {
+                    const colors: Record<string, string> = { puzzle: 'bg-purple-50 text-purple-700', time_travel: 'bg-indigo-50 text-indigo-700', dictation: 'bg-rose-50 text-rose-700', writing: 'bg-violet-50 text-violet-700' };
+                    const icons: Record<string, string> = { puzzle: '🧩', time_travel: '⏰', dictation: '🎙️', writing: '✍️' };
+                    return (
+                      <div key={idx} className={`flex items-center gap-2.5 rounded-xl px-3 py-2 ${colors[item.type] ?? 'bg-slate-50 text-slate-600'}`}>
+                        <span>{icons[item.type] ?? '📚'}</span>
+                        <span className="text-xs font-black">{item.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 text-center py-3">Niciun exercițiu în draft.</p>
+              )}
+              <div className="flex gap-2 pt-1">
+                <button
+                  onClick={() => setShowDraftPreview(false)}
+                  className="flex-1 py-2.5 border border-slate-200 rounded-xl font-black text-sm text-slate-500 hover:border-slate-300 transition-all"
+                >
+                  Anulează
+                </button>
+                <button
+                  onClick={() => { setShowDraftPreview(false); handleSendDraft(); }}
+                  disabled={draftItems.length === 0 || homeworkSending}
+                  className="flex-1 py-2.5 bg-emerald-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-emerald-700 transition-all disabled:opacity-40 flex items-center justify-center gap-2"
+                >
+                  {homeworkSending ? <Loader2 size={15} className="animate-spin" /> : '📤 Trimite'}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
+      {/* Draft toast — teacher + student */}
+      {draftToast && (
+        <div className="fixed bottom-24 left-1/2 -translate-x-1/2 z-[200] bg-emerald-600 text-white px-5 py-2.5 rounded-full shadow-lg font-bold text-sm whitespace-nowrap">
+          ✓ {draftToast}
+        </div>
       )}
 
       {/* Homework code modal */}

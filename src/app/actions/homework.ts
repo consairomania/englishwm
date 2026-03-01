@@ -73,3 +73,19 @@ export async function getTeacherHomework(teacherId: string): Promise<HomeworkAss
   if (error) return [];
   return (data ?? []) as HomeworkAssignment[];
 }
+
+export async function getStudentHomework(studentId: string): Promise<HomeworkAssignment[]> {
+  const { data, error } = await supabase
+    .from('homework_assignments')
+    .select('*')
+    .eq('student_id', studentId)
+    .order('created_at', { ascending: false })
+    .limit(20);
+  if (error) return [];
+  return (data ?? []) as HomeworkAssignment[];
+}
+
+export async function deleteHomework(id: string): Promise<void> {
+  const { error } = await supabase.from('homework_assignments').delete().eq('id', id);
+  if (error) throw new Error('Eroare ștergere temă: ' + error.message);
+}

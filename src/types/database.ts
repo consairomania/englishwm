@@ -13,11 +13,22 @@ export type Session = {
 
 export type SessionState = {
   session_id: string;
-  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena' | 'dictation' | 'writing';
+  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena' | 'dictation' | 'writing' | 'homework_portfolio';
   exercise_data: Record<string, unknown>;
   teacher_pings: unknown[];
   updated_at: string;
 };
+
+export interface DraftHomeworkItem {
+  type: 'puzzle' | 'time_travel' | 'dictation' | 'writing';
+  data: unknown;
+  label: string;
+  added_at: string;
+}
+
+export interface DraftHomework {
+  items: DraftHomeworkItem[];
+}
 
 export type VocabWord = {
   en: string;
