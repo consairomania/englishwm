@@ -1164,6 +1164,12 @@ function StudentJoin({ onJoin, onBack }: { onJoin: (code: string) => void; onBac
             {checking ? <Loader2 className="animate-spin" size={18} /> : <>Intră <ChevronRight size={18} /></>}
           </button>
         </div>
+        <a
+          href="/homework"
+          className="w-full bg-violet-50 border-2 border-violet-200 hover:border-violet-400 text-violet-600 hover:text-violet-700 py-3.5 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-3 transition-all"
+        >
+          <BookOpen size={16} /> Am o temă
+        </a>
         <button
           onClick={onBack}
           className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors py-2"
