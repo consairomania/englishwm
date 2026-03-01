@@ -113,6 +113,8 @@ function normalizeStudent(raw: Record<string, unknown>): Student {
       grammar: (rawSkills?.grammar as number) ?? 15,
       vocabulary: (rawSkills?.vocabulary as number) ?? 30,
     },
+    notes: (raw.notes as string) ?? '',
+    vocabulary: Array.isArray(raw.vocabulary) ? raw.vocabulary : [],
     created_at: raw.created_at as string,
   };
 }

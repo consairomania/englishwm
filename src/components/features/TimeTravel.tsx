@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown } from 'lucide-react';
+import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown, Zap } from 'lucide-react';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import { generateTimeTravelContent, clearTimeTravelContent } from '@/app/actions/gemini';
 import { playWrongSound } from '@/lib/sound';
@@ -47,6 +47,46 @@ type EnglishTense = string;
 const WRONG_FLASH_MS = 1500;
 const N = 15; // numărul de exerciții generat
 
+// ── Nivel CEFR per structură gramaticală ──────────────────────────────────────
+const TENSE_LEVELS: Record<string, string> = {
+  'Present Simple': 'A1', 'Can': 'A1',
+  'Present Continuous': 'A2', 'Past Simple': 'A2', 'Future Simple (will)': 'A2',
+  'Could': 'A2', 'Should': 'A2', 'Have to': 'A2', 'Need to': 'A2',
+  'Present Perfect': 'B1', 'Past Continuous': 'B1', 'Type 0 Conditional': 'B1',
+  'First Conditional': 'B1', 'Would': 'B1', 'Used to': 'B1', 'Must': 'B1',
+  'May': 'B1', 'Might': 'B1', 'Present Simple Passive': 'B1', 'Past Simple Passive': 'B1',
+  'Stative Verbs': 'B1',
+  'Present Perfect Continuous': 'B2', 'Past Perfect': 'B2', 'Future Continuous': 'B2',
+  'Second Conditional': 'B2', 'Present Perfect Passive': 'B2', 'Future Simple Passive': 'B2',
+  'Future in the Past': 'B2', 'Had better': 'B2',
+  'Past Perfect Continuous': 'C1', 'Future Perfect': 'C1', 'Future Perfect Continuous': 'C1',
+  'Third Conditional': 'C1', 'Modal + Present Perfect': 'C1', 'Past Perfect Passive': 'C1',
+  'Present Continuous Passive': 'C1',
+};
+
+const LEVEL_BADGE_COLORS: Record<string, string> = {
+  A1: 'bg-emerald-100 text-emerald-700',
+  A2: 'bg-lime-100 text-lime-700',
+  B1: 'bg-amber-100 text-amber-700',
+  B2: 'bg-orange-100 text-orange-700',
+  C1: 'bg-purple-100 text-purple-700',
+  C2: 'bg-indigo-100 text-indigo-700',
+};
+
+// Tense-uri recomandate per nivel CEFR (pentru butonul Surpriză)
+const LEVEL_TENSES: Record<string, string[]> = {
+  A1: ['Present Simple', 'Can'],
+  A2: ['Present Simple', 'Present Continuous', 'Past Simple', 'Future Simple (will)', 'Could', 'Should', 'Have to', 'Need to'],
+  B1: ['Present Simple', 'Present Continuous', 'Present Perfect', 'Past Simple', 'Past Continuous',
+       'Future Simple (will)', 'Type 0 Conditional', 'First Conditional', 'Would', 'Used to',
+       'Must', 'May', 'Might', 'Present Simple Passive', 'Past Simple Passive', 'Stative Verbs'],
+  B2: ['Present Perfect', 'Present Perfect Continuous', 'Past Perfect', 'Future Continuous',
+       'Second Conditional', 'Modal + Present Perfect', 'Present Perfect Passive',
+       'Future Simple Passive', 'Future in the Past', 'Had better'],
+  C1: ALL_TENSES,
+  C2: ALL_TENSES,
+};
+
 function fillBlanks(sentence: string, option: string): string {
   const blanks = (sentence.match(/___/g) || []).length;
   const words = option.trim().split(/\s+/);
@@ -58,6 +98,41 @@ function fillBlanks(sentence: string, option: string): string {
     result = result.replace('___', word);
   }
   return result;
+}
+
+const TT_WAITING_MESSAGES = [
+  'Profesorul configurează exercițiile...',
+  'Se generează întrebările gramaticale...',
+  'Time Travel e pe drum!',
+  'Pregătește-te să călătorești în timp!',
+];
+
+function TTWaitingForTeacher() {
+  const [msgIdx, setMsgIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setMsgIdx((prev) => (prev + 1) % TT_WAITING_MESSAGES.length);
+        setVisible(true);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="text-5xl" style={{ animation: 'bounce 2s infinite' }}>⏰</div>
+      <p
+        className="text-white/70 font-bold text-sm text-center transition-opacity duration-300"
+        style={{ opacity: visible ? 1 : 0 }}
+      >
+        {TT_WAITING_MESSAGES[msgIdx]}
+      </p>
+    </div>
+  );
 }
 
 export type StudentTimeTravelAnswers = {
@@ -107,12 +182,15 @@ export function TimeTravelView({
   const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
 
   // Ref pentru click-outside pe dropdown
   const dropdownRef = useRef<HTMLDivElement>(null);
 
   // Debounce ref pentru sync la DB
   const syncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Cooldown timer ref
+  const cooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // ── Click-outside închide dropdown-ul ────────────────────────────────────────
   useEffect(() => {
@@ -204,13 +282,13 @@ export function TimeTravelView({
   };
 
   // ── Generare (profesor) ───────────────────────────────────────────────────────
-  const handleGenerate = async () => {
-    if (isGenerating) return;
+  const handleGenerate = async (overrideTenses?: string[]) => {
+    if (isGenerating || isCoolingDown) return;
     const wasRandom = !topic.trim();
     setIsGenerating(true);
     setGenError('');
     try {
-      const tensesToPass = selectedTenses.length > 0 ? selectedTenses : undefined;
+      const tensesToPass = overrideTenses ?? (selectedTenses.length > 0 ? selectedTenses : undefined);
       const { chosenTopic } = await generateTimeTravelContent(
         sessionId,
         studentLevel,
@@ -223,7 +301,22 @@ export function TimeTravelView({
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     } finally {
       setIsGenerating(false);
+      if (cooldownRef.current) clearTimeout(cooldownRef.current);
+      setIsCoolingDown(true);
+      cooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
     }
+  };
+
+  // ── Surpriză: tense-uri random potrivite nivelului elevului ──────────────────
+  const handleSurprise = () => {
+    if (isGenerating || isCoolingDown) return;
+    const levelKey = studentLevel.toUpperCase().substring(0, 2);
+    const pool = LEVEL_TENSES[levelKey] ?? ALL_TENSES;
+    const shuffled = [...pool].sort(() => Math.random() - 0.5);
+    const picked = shuffled.slice(0, 5);
+    setSelectedTenses(picked);
+    setTopic('');
+    handleGenerate(picked);
   };
 
   const handleClear = async () => {
@@ -375,7 +468,12 @@ export function TimeTravelView({
                                     onChange={() => toggleTense(t)}
                                     className="accent-indigo-600 w-3.5 h-3.5"
                                   />
-                                  <span className="text-sm font-medium text-slate-600">{t}</span>
+                                  <span className="text-sm font-medium text-slate-600 flex-1">{t}</span>
+                                  {TENSE_LEVELS[t] && (
+                                    <span className={`text-[9px] font-black px-1.5 py-0.5 rounded-md shrink-0 ${LEVEL_BADGE_COLORS[TENSE_LEVELS[t]] ?? 'bg-slate-100 text-slate-500'}`}>
+                                      {TENSE_LEVELS[t]}
+                                    </span>
+                                  )}
                                 </label>
                               ))}
                             </div>
@@ -388,20 +486,32 @@ export function TimeTravelView({
               )}
             </div>
 
+            {/* Buton Surpriză */}
+            <button
+              onClick={handleSurprise}
+              disabled={isGenerating || isCoolingDown}
+              title={`Generează automat 5 tense-uri potrivite nivelului ${studentLevel}`}
+              className="px-4 py-3 bg-violet-500 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-violet-600 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shrink-0"
+            >
+              🎲 Surpriză
+            </button>
+
             {/* Buton generare */}
             <button
-              onClick={handleGenerate}
-              disabled={isGenerating}
+              onClick={() => handleGenerate()}
+              disabled={isGenerating || isCoolingDown}
               className="px-5 py-3 bg-indigo-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-indigo-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md shrink-0"
             >
               {isGenerating ? (
                 <Loader2 className="animate-spin" size={16} />
+              ) : isCoolingDown ? (
+                <Clock size={15} />
               ) : isRandom ? (
                 <Shuffle size={15} />
               ) : (
                 <RefreshCw size={15} />
               )}
-              {isGenerating ? 'Generez...' : isRandom ? 'Random' : timeTravelData ? 'Re-generează' : 'Generează'}
+              {isGenerating ? 'Generez...' : isCoolingDown ? 'Cooldown...' : isRandom ? 'Random' : timeTravelData ? 'Re-generează' : 'Generează'}
             </button>
           </div>
           {genError && (
@@ -425,12 +535,7 @@ export function TimeTravelView({
               {isGenerating && <Loader2 className="animate-spin text-indigo-400" size={24} />}
             </div>
           ) : (
-            <FormattedLabel
-              level={studentLevel}
-              en="Wait for the teacher to launch Time Travel..."
-              ro="Așteaptă ca profesorul să lanseze Time Travel..."
-              dark
-            />
+            <TTWaitingForTeacher />
           )}
         </div>
       ) : (

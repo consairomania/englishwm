@@ -37,6 +37,8 @@ import {
   Eye,
   EyeOff,
   Shuffle,
+  Users,
+  Mic,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -49,6 +51,7 @@ import {
 import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/roomCode';
 import { playSuccessSound, playWrongSound, setSoundMuted } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
+import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TimeTravelView, StudentTimeTravelAnswers } from '@/components/features/TimeTravel';
 import {
   getAllStudents,
@@ -58,7 +61,7 @@ import {
   updateStudentDetails,
   getStudentById,
 } from '@/lib/studentService';
-import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData } from '@/types/database';
+import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData, DictationData, StudentDictationAnswer, VocabWord } from '@/types/database';
 import {
   generatePuzzleContent,
   clearPuzzleContent,
@@ -68,6 +71,11 @@ import {
   deleteVoyagerImage,
   generateQuestContent,
   clearQuestContent,
+  updateStudentNotes,
+  addVocabularyToStudent,
+  generateDictationContent,
+  clearDictationContent,
+  evaluateDictationAnswer,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 
@@ -143,6 +151,8 @@ type Student = {
   xp: number;
   nextLevelXp: number;
   skills: { speaking: number; grammar: number; vocabulary: number };
+  notes: string;
+  vocabulary: VocabWord[];
   avatar: string;
   avatarColor: string;
 };
@@ -158,6 +168,8 @@ function dbStudentToLocal(s: DBStudent): Student {
     xp: s.xp,
     nextLevelXp: 1000,
     skills: s.skills,
+    notes: s.notes ?? '',
+    vocabulary: s.vocabulary ?? [],
     avatar: AVATARS[idx],
     avatarColor: AVATAR_COLORS[colorIdx],
   };
@@ -305,7 +317,9 @@ function TeacherHome({
   const [editName, setEditName] = useState('');
   const [editLevel, setEditLevel] = useState('');
   const [editAgeSegment, setEditAgeSegment] = useState<'child' | 'teenager' | 'adult'>('adult');
+  const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     getAllStudents().then((data) => {
@@ -344,13 +358,25 @@ function TeacherHome({
     setEditName(s.name);
     setEditLevel(s.level);
     setEditAgeSegment(s.age_segment ?? 'adult');
+    setEditNotes(s.notes ?? '');
   };
 
   const handleCancelEdit = () => {
+    if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
     setEditingId(null);
     setEditName('');
     setEditLevel('');
     setEditAgeSegment('adult');
+    setEditNotes('');
+  };
+
+  const handleNotesChange = (id: string, value: string) => {
+    setEditNotes(value);
+    if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
+    notesDebounceRef.current = setTimeout(async () => {
+      await updateStudentNotes(id, value);
+      setStudents(prev => prev.map(s => s.id === id ? { ...s, notes: value } : s));
+    }, 1000);
   };
 
   const handleSaveEdit = async () => {
@@ -510,6 +536,13 @@ function TeacherHome({
                         </button>
                       ))}
                     </div>
+                    <textarea
+                      className="w-full px-3 py-2 rounded-lg bg-white border border-slate-200 outline-none text-slate-700 text-xs resize-none focus:border-pink-300"
+                      rows={3}
+                      value={editNotes}
+                      onChange={(e) => handleNotesChange(s.id, e.target.value)}
+                      placeholder="Observații despre elev (se salvează automat)..."
+                    />
                     <div className="flex gap-2">
                       <button
                         onClick={handleSaveEdit}
@@ -533,6 +566,9 @@ function TeacherHome({
                       <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">
                         {s.level} · {s.age_segment === 'child' ? 'Copil' : s.age_segment === 'teenager' ? 'Adolescent' : 'Adult'} · {s.xp} XP · Speaking {s.skills.speaking}% · Grammar {s.skills.grammar}%
                       </p>
+                      {s.notes && (
+                        <p className="text-[10px] text-slate-400 italic mt-0.5 truncate">{s.notes.slice(0, 60)}{s.notes.length > 60 ? '…' : ''}</p>
+                      )}
                     </div>
                     <div className="flex gap-1.5 shrink-0">
                       {confirmDeleteId === s.id ? (
@@ -774,20 +810,62 @@ function SeedingScreen({ message = 'Se pregătește camera...' }: { message?: st
   );
 }
 
-// ─── Session Closed Overlay (pentru elev) ─────────────────────────────────────
-function SessionClosedOverlay() {
+// ─── Session Closed Overlay — "Ce am învățat azi" ─────────────────────────────
+type SessionEndStatsType = {
+  xpEarned: number;
+  correctAnswers: number;
+  vocabulary: { en: string; ro: string }[];
+};
+function SessionClosedOverlay({ stats }: { stats: SessionEndStatsType | null }) {
+  const motivational = !stats || stats.xpEarned === 0
+    ? 'Mult succes la lecția următoare! 🌟'
+    : stats.xpEarned >= 500
+    ? 'Sesiune excelentă! Ai muncit din greu! 🏆'
+    : stats.xpEarned >= 200
+    ? 'Bravo! Ai progresat mult astăzi! ⭐'
+    : 'Bine! Continuă să exersezi! 💪';
+
   return (
-    <div className="fixed inset-0 z-200 bg-slate-900/80 backdrop-blur-md flex items-center justify-center">
-      <div className="bg-white rounded-[32px] p-8 shadow-2xl text-center space-y-4 max-w-xs mx-4">
-        <div className="w-16 h-16 bg-slate-100 rounded-2xl flex items-center justify-center mx-auto">
-          <WifiOff className="text-slate-500" size={28} />
-        </div>
-        <h2 className="text-xl font-black text-slate-800 italic uppercase tracking-tighter">
-          Sesiunea a fost închisă
+    <div className="fixed inset-0 z-200 bg-slate-900/90 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-white rounded-[32px] p-8 shadow-2xl text-center space-y-5 max-w-sm w-full mx-4">
+        <div className="text-5xl">🎓</div>
+        <h2 className="text-xl font-black text-slate-800 uppercase tracking-tighter">
+          Lecția s-a încheiat!
         </h2>
-        <p className="text-slate-500 text-sm font-bold">
-          Profesorul a terminat lecția. Vei fi redirecționat...
-        </p>
+        <p className="text-slate-500 text-sm font-medium italic">{motivational}</p>
+
+        {stats && (
+          <div className="space-y-3 text-left">
+            <div className="grid grid-cols-2 gap-3">
+              <div className="bg-pink-50 rounded-2xl p-3">
+                <p className="text-xs text-pink-400 font-bold uppercase mb-1">XP câștigat</p>
+                <p className="text-2xl font-black text-pink-600">+{stats.xpEarned}</p>
+              </div>
+              {stats.correctAnswers > 0 && (
+                <div className="bg-emerald-50 rounded-2xl p-3">
+                  <p className="text-xs text-emerald-500 font-bold uppercase mb-1">Time Travel</p>
+                  <p className="text-2xl font-black text-emerald-600">{stats.correctAnswers} ✓</p>
+                </div>
+              )}
+            </div>
+
+            {stats.vocabulary.length > 0 && (
+              <div className="bg-slate-50 rounded-2xl p-4">
+                <p className="text-xs text-slate-400 font-bold uppercase mb-2">Vocabular nou</p>
+                <div className="space-y-1">
+                  {stats.vocabulary.map((v, i) => (
+                    <div key={i} className="flex gap-2 items-baseline">
+                      <strong lang="en" className="text-slate-800 text-sm font-black">{v.en}</strong>
+                      <span lang="ro" className="text-slate-400 text-xs italic">{v.ro}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        <p className="text-slate-400 text-xs">Vei fi redirecționat în câteva secunde...</p>
         <div className="flex justify-center">
           <Loader2 className="animate-spin text-pink-400" size={20} />
         </div>
@@ -810,6 +888,25 @@ function XpToast({ amount, onDone }: { amount: number; onDone: () => void }) {
   );
 }
 
+// ─── Level Up Toast ────────────────────────────────────────────────────────────
+function LevelUpToast({ onDone }: { onDone: () => void }) {
+  useEffect(() => {
+    const t = setTimeout(onDone, 3500);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return (
+    <div className="fixed top-1/3 left-1/2 -translate-x-1/2 z-[300] flex flex-col items-center gap-3 pointer-events-none">
+      <div className="bg-gradient-to-r from-yellow-400 to-orange-500 text-white font-black text-2xl px-10 py-5 rounded-3xl shadow-2xl uppercase tracking-widest animate-bounce text-center">
+        🎉 LEVEL UP!
+      </div>
+      <p className="text-white font-black text-sm bg-slate-900/80 px-4 py-2 rounded-xl">
+        Continuă să înveți!
+      </p>
+    </div>
+  );
+}
+
 // ─── Dashboard ────────────────────────────────────────────────────────────────
 function DashboardView({
   student,
@@ -820,6 +917,7 @@ function DashboardView({
   isTeacher,
   onResetXp,
   onAdjustSkill,
+  onGoToPortfolio,
 }: {
   student: Student;
   vocabularyLoot: string[];
@@ -829,6 +927,7 @@ function DashboardView({
   isTeacher: boolean;
   onResetXp?: () => void;
   onAdjustSkill?: (skill: keyof Student['skills'], delta: number) => void;
+  onGoToPortfolio?: () => void;
 }) {
   const xpPercent = Math.min((student.xp / student.nextLevelXp) * 100, 100);
   const activities = [
@@ -840,6 +939,14 @@ function DashboardView({
 
   return (
     <div className="space-y-4 max-w-5xl mx-auto px-4 pb-24">
+      {isTeacher && onGoToPortfolio && (
+        <button
+          onClick={onGoToPortfolio}
+          className="flex items-center gap-2 text-slate-400 hover:text-pink-600 transition-colors font-black text-xs uppercase tracking-widest"
+        >
+          <Users size={13} /> Portofoliu elevi
+        </button>
+      )}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <div className="lg:col-span-2 bg-linear-to-br from-pink-600 to-pink-800 rounded-[30px] p-6 text-white shadow-xl relative overflow-hidden flex flex-col justify-between min-h-[180px]">
           <div className="absolute -top-8 -right-8 w-40 h-40 bg-pink-400/20 rounded-full blur-3xl pointer-events-none" />
@@ -866,10 +973,22 @@ function DashboardView({
           </div>
           <div className="mt-4 space-y-1.5 relative z-10">
             <div className="flex justify-between text-[9px] font-black uppercase tracking-widest opacity-80">
-              <span>Progression</span><span>{Math.round(xpPercent)}%</span>
+              <span>Nivel {Math.floor(student.xp / 1000)}</span>
+              <span>{Math.round(xpPercent)}%</span>
             </div>
-            <div className="w-full bg-black/20 h-2.5 rounded-full overflow-hidden">
-              <div className="bg-yellow-400 h-full rounded-full transition-all duration-1000 ease-out" style={{ width: `${xpPercent}%` }} />
+            <div className="w-full bg-black/20 h-4 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full transition-all duration-1000 ease-out"
+                style={{
+                  width: `${xpPercent}%`,
+                  background: 'linear-gradient(90deg, #facc15, #f97316)',
+                  boxShadow: xpPercent > 10 ? '0 0 8px rgba(251,191,36,0.7)' : 'none',
+                }}
+              />
+            </div>
+            <div className="flex justify-between text-[8px] font-bold opacity-60">
+              <span>{student.xp} XP</span>
+              <span>→ Nivel {Math.floor(student.xp / 1000) + 1} ({1000 - (student.xp % 1000)} XP rămași)</span>
             </div>
           </div>
         </div>
@@ -936,6 +1055,26 @@ function DashboardView({
           </div>
         ))}
       </div>
+      {!isTeacher && student.vocabulary && student.vocabulary.length > 0 && (
+        <div className="bg-white rounded-[30px] p-5 shadow-lg border border-slate-50">
+          <h3 className="text-[10px] font-black text-slate-400 mb-3 uppercase tracking-[0.2em] flex items-center gap-2">
+            <BookOpen className="text-violet-500" size={14} /> Cuvintele mele ({student.vocabulary.length})
+          </h3>
+          <div className="flex flex-wrap gap-2">
+            {student.vocabulary.slice(0, 20).map((w, i) => (
+              <div key={i} className="flex flex-col bg-violet-50 border border-violet-100 px-3 py-1.5 rounded-xl">
+                <span className="font-black text-violet-800 text-[11px]">{w.en}</span>
+                <span className="text-violet-400 italic text-[10px]">{w.ro}</span>
+              </div>
+            ))}
+            {student.vocabulary.length > 20 && (
+              <div className="flex items-center px-3 py-1.5 text-slate-400 text-[10px] font-bold">
+                +{student.vocabulary.length - 20} mai multe
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       <div className="bg-slate-900 rounded-[30px] p-6 text-white shadow-2xl relative overflow-hidden border-t-2 border-pink-600">
         <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_right,var(--tw-gradient-stops))] from-pink-900/30 via-transparent to-transparent pointer-events-none" />
         <h3 className="text-xs font-black flex items-center gap-2 uppercase tracking-widest italic mb-4 relative z-10">
@@ -970,6 +1109,86 @@ function DashboardView({
   );
 }
 
+// ─── WaitingForTeacher — animație tematică per modul ─────────────────────────
+const WAITING_CONFIGS: Record<string, { icon: string; messages: string[] }> = {
+  puzzle: {
+    icon: '🧩',
+    messages: [
+      'Profesorul pregătește puzzle-ul...',
+      'Se construiește propoziția...',
+      'Pregătește-te să ordonezi cuvintele!',
+      'Aproape gata!',
+    ],
+  },
+  voyager: {
+    icon: '🌍',
+    messages: [
+      'Se generează scena vizuală...',
+      'Profesorul explorează un loc nou...',
+      'Imaginea se creează...',
+      'Aventura e pe drum!',
+    ],
+  },
+  arena: {
+    icon: '⚔️',
+    messages: [
+      'Profesorul pregătește misiunea...',
+      'Briefing-ul se elaborează...',
+      'Misiunea e aproape gata!',
+      'Pregătește-te pentru roleplay!',
+    ],
+  },
+  tense_arena: {
+    icon: '⏰',
+    messages: [
+      'Profesorul configurează exercițiile...',
+      'Se generează întrebările gramaticale...',
+      'Time Travel e pe drum!',
+      'Pregătește-te să călătorești în timp!',
+    ],
+  },
+  dictation: {
+    icon: '🎙️',
+    messages: [
+      'Profesorul pregătește dictarea...',
+      'Fii atent la ce auzi!',
+      'Exercițiul de dictare e aproape gata...',
+      'Pregătește-te să scrii!',
+    ],
+  },
+};
+
+function WaitingForTeacher({ module }: { module: keyof typeof WAITING_CONFIGS }) {
+  const config = WAITING_CONFIGS[module] ?? WAITING_CONFIGS.puzzle;
+  const [msgIdx, setMsgIdx] = useState(0);
+  const [visible, setVisible] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setVisible(false);
+      setTimeout(() => {
+        setMsgIdx((prev) => (prev + 1) % config.messages.length);
+        setVisible(true);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [config.messages.length]);
+
+  return (
+    <div className="flex flex-col items-center gap-4">
+      <div className="text-5xl" style={{ animation: 'bounce 2s infinite' }}>
+        {config.icon}
+      </div>
+      <p
+        className="text-white/70 font-bold text-sm text-center transition-opacity duration-300"
+        style={{ opacity: visible ? 1 : 0 }}
+      >
+        {config.messages[msgIdx]}
+      </p>
+    </div>
+  );
+}
+
 // ─── View-uri activitate ──────────────────────────────────────────────────────
 type PuzzleProgress = { selection: { word: string; idx: number }[]; is_correct: boolean };
 
@@ -996,12 +1215,14 @@ function PuzzleView({
 }) {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
   const [userSelection, setUserSelection] = useState<{ word: string; idx: number }[]>([]);
   const [isCorrect, setIsCorrect] = useState(false);
   const [isWrong, setIsWrong] = useState(false);
   const [xpAwarded, setXpAwarded] = useState(false);
   const progressSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const puzzleCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Reset sau restaurare când se schimbă puzzle-ul (sau la mount după refresh)
   useEffect(() => {
@@ -1051,7 +1272,7 @@ function PuzzleView({
   }, [userSelection, isCorrect, isTeacher, sessionId]);
 
   const handleGenerate = async () => {
-    if (isGenerating) return;
+    if (isGenerating || isCoolingDown) return;
     setIsGenerating(true);
     setGenError('');
     try {
@@ -1062,6 +1283,9 @@ function PuzzleView({
       setGenError(e instanceof Error ? e.message : 'Eroare necunoscută. Încearcă din nou.');
     }
     setIsGenerating(false);
+    if (puzzleCooldownRef.current) clearTimeout(puzzleCooldownRef.current);
+    setIsCoolingDown(true);
+    puzzleCooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
   };
 
   const handleWordClick = (word: string, idx: number) => {
@@ -1138,17 +1362,18 @@ function PuzzleView({
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
             />
             <button
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
               className="px-5 py-3 bg-purple-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-purple-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
             >
               {isGenerating
                 ? <Loader2 className="animate-spin" size={16} />
+                : isCoolingDown ? <Clock size={15} />
                 : topic.trim() ? <Send size={15} /> : <Shuffle size={15} />}
-              {isGenerating ? 'Generez...' : topic.trim() ? 'Build' : 'Random'}
+              {isGenerating ? 'Generez...' : isCoolingDown ? 'Cooldown...' : topic.trim() ? 'Build' : 'Random'}
             </button>
           </div>
           {genError && (
@@ -1234,17 +1459,7 @@ function PuzzleView({
               Introdu un subiect și generează primul puzzle pentru elev.
             </p>
           ) : (
-            <>
-              <p className="text-slate-700 font-black text-sm uppercase tracking-widest">
-                Aștepți puzzle-ul...
-              </p>
-              <div className="flex justify-center">
-                <Loader2 className="animate-spin text-purple-400" size={22} />
-              </div>
-              <p className="text-slate-400 font-medium text-xs">
-                Profesorul pregătește o propoziție pentru tine
-              </p>
-            </>
+            <WaitingForTeacher module="puzzle" />
           )}
         </div>
       ) : (
@@ -1417,12 +1632,14 @@ function VoyagerView({
 }) {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
   // Stare locală optimistă — doar profesorul actualizează (UI snap înainte ca Realtime să confirme)
   const [localTasks, setLocalTasks] = useState<boolean[]>([false, false, false]);
   // Dacă avem deja un URL (din DB sau cache), nu pornim cu spinner
   const [imageLoading, setImageLoading] = useState(!voyagerData?.image_url && !cachedImageUrl);
   const [imageError, setImageError] = useState(false);
+  const voyagerCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref pentru a nu reseta imageLoading la primul mount (când imaginea există deja)
   const isFirstRender = useRef(true);
 
@@ -1442,7 +1659,7 @@ function VoyagerView({
   );
 
   const handleGenerate = async () => {
-    if (isGenerating) return;
+    if (isGenerating || isCoolingDown) return;
     setIsGenerating(true);
     setGenError('');
     try {
@@ -1453,6 +1670,9 @@ function VoyagerView({
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
     setIsGenerating(false);
+    if (voyagerCooldownRef.current) clearTimeout(voyagerCooldownRef.current);
+    setIsCoolingDown(true);
+    voyagerCooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
   };
 
   const handleClear = async () => {
@@ -1467,6 +1687,13 @@ function VoyagerView({
     updated[i] = true;
     setLocalTasks(updated); // optimistic
     addXp(50);
+    // Salvează vocabularul Voyager în banca de cuvinte a elevului (prima marcare a primului task)
+    if (i === 0 && voyagerData.vocabulary?.length && student.dbId) {
+      const words: VocabWord[] = voyagerData.vocabulary.map(w => ({
+        en: w.en, ro: w.ro, source: 'voyager', date: new Date().toISOString().split('T')[0],
+      }));
+      addVocabularyToStudent(student.dbId, words).catch(console.error);
+    }
     const { data: current } = await supabase
       .from('session_state')
       .select('exercise_data')
@@ -1509,15 +1736,15 @@ function VoyagerView({
               rows={2}
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
             />
             <button
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
               className="px-5 py-3 bg-pink-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-pink-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md self-end"
             >
-              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : topic.trim() ? <Sparkles size={15} /> : <Shuffle size={15} />}
-              {isGenerating ? 'Generez...' : topic.trim() ? 'Build' : 'Random'}
+              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : isCoolingDown ? <Clock size={15} /> : topic.trim() ? <Sparkles size={15} /> : <Shuffle size={15} />}
+              {isGenerating ? 'Generez...' : isCoolingDown ? 'Cooldown...' : topic.trim() ? 'Build' : 'Random'}
             </button>
           </div>
           {genError && (
@@ -1539,7 +1766,7 @@ function VoyagerView({
           <div className="opacity-60">
             {isTeacher
               ? <p className="text-white font-bold text-sm text-center">Introdu o descriere și generează prima scenă.</p>
-              : <FormattedLabel level={student.level} en="Waiting for the scene..." ro="Se pregătește scena..." dark />
+              : <WaitingForTeacher module="voyager" />
             }
           </div>
         </div>
@@ -1671,9 +1898,11 @@ function ArenaView({
 }) {
   const [topic, setTopic] = useState('');
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
   // Stare locală optimistă — doar profesorul actualizează
   const [localClaimed, setLocalClaimed] = useState<string[]>([]);
+  const arenaCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setLocalClaimed([]);
@@ -1683,7 +1912,7 @@ function ArenaView({
   const effectiveClaimed = new Set([...(studentBoosterProgress ?? []), ...localClaimed]);
 
   const handleGenerate = async () => {
-    if (isGenerating) return;
+    if (isGenerating || isCoolingDown) return;
     setIsGenerating(true);
     setGenError('');
     try {
@@ -1694,6 +1923,9 @@ function ArenaView({
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
     setIsGenerating(false);
+    if (arenaCooldownRef.current) clearTimeout(arenaCooldownRef.current);
+    setIsCoolingDown(true);
+    arenaCooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
   };
 
   const handleClear = async () => {
@@ -1707,6 +1939,13 @@ function ArenaView({
     const updatedIds = [...Array.from(effectiveClaimed), booster.id];
     setLocalClaimed(prev => [...prev, booster.id]); // optimistic
     addXp(booster.xp);
+    // Salvează vocabularul quest în banca de cuvinte la primul booster acordat
+    if (effectiveClaimed.size === 0 && questData.vocabulary_to_use?.length && student.dbId) {
+      const words: VocabWord[] = questData.vocabulary_to_use.map(w => ({
+        en: w, ro: w, source: 'quest', date: new Date().toISOString().split('T')[0],
+      }));
+      addVocabularyToStudent(student.dbId, words).catch(console.error);
+    }
     const { data: current } = await supabase
       .from('session_state')
       .select('exercise_data')
@@ -1750,15 +1989,15 @@ function ArenaView({
               value={topic}
               onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
             />
             <button
               onClick={handleGenerate}
-              disabled={isGenerating}
+              disabled={isGenerating || isCoolingDown}
               className="px-5 py-3 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest flex items-center gap-2 hover:bg-emerald-700 active:scale-95 transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-md"
             >
-              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : topic.trim() ? <Sword size={15} /> : <Shuffle size={15} />}
-              {isGenerating ? 'Generez...' : topic.trim() ? 'Launch' : 'Random'}
+              {isGenerating ? <Loader2 className="animate-spin" size={16} /> : isCoolingDown ? <Clock size={15} /> : topic.trim() ? <Sword size={15} /> : <Shuffle size={15} />}
+              {isGenerating ? 'Generez...' : isCoolingDown ? 'Cooldown...' : topic.trim() ? 'Launch' : 'Random'}
             </button>
           </div>
           {genError && (
@@ -1776,7 +2015,7 @@ function ArenaView({
           <Target size={48} className="text-white opacity-20" />
           {isTeacher
             ? <p className="text-white/50 font-bold text-sm text-center">Introdu contextul și lansează prima misiune.</p>
-            : <FormattedLabel level={student.level} en="Wait for the teacher to launch the mission..." ro="Așteaptă ca profesorul să lanseze misiunea..." dark />
+            : <WaitingForTeacher module="arena" />
           }
         </div>
       ) : (
@@ -1861,6 +2100,276 @@ function ArenaView({
   );
 }
 
+// ─── Dictation ─────────────────────────────────────────────────────────────────
+function DictationView({
+  student,
+  onBack,
+  isTeacher,
+  sessionId,
+  dictationData,
+  onDictationGenerated,
+  addXp,
+  studentDictationAnswer,
+  studentDictationDraft,
+}: {
+  student: Student;
+  onBack?: () => void;
+  isTeacher: boolean;
+  sessionId: string;
+  dictationData: DictationData | null;
+  onDictationGenerated: (data: DictationData | null) => void;
+  addXp: (amount: number) => void;
+  studentDictationAnswer?: StudentDictationAnswer | null;
+  studentDictationDraft?: string | null;
+}) {
+  const [topic, setTopic] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
+  const [genError, setGenError] = useState('');
+  const [studentText, setStudentText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const dictationCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Reset student text when new dictation is generated
+  useEffect(() => {
+    setStudentText('');
+  }, [dictationData?.sentence_en]);
+
+  const handleGenerate = async () => {
+    if (isGenerating || isCoolingDown) return;
+    setIsGenerating(true);
+    setGenError('');
+    try {
+      const { data } = await generateDictationContent(sessionId, topic.trim(), student.level, student.age_segment);
+      onDictationGenerated(data);
+      setTopic(topic.trim() ? '' : data.topic);
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
+    }
+    setIsGenerating(false);
+    if (dictationCooldownRef.current) clearTimeout(dictationCooldownRef.current);
+    setIsCoolingDown(true);
+    dictationCooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
+  };
+
+  const handleClear = async () => {
+    await clearDictationContent(sessionId);
+    onDictationGenerated(null);
+  };
+
+  const handleStudentSubmit = async () => {
+    if (!studentText.trim() || !dictationData || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const result = await evaluateDictationAnswer(dictationData.sentence_en, studentText.trim());
+      const answer: StudentDictationAnswer = {
+        text: studentText.trim(),
+        ...result,
+        submitted_at: new Date().toISOString(),
+      };
+      // Write to exercise_data
+      const { data: current } = await supabase
+        .from('session_state')
+        .select('exercise_data')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+      const existing = typeof current?.exercise_data === 'object' && current.exercise_data !== null
+        ? (current.exercise_data as Record<string, unknown>) : {};
+      await supabase.from('session_state')
+        .update({ exercise_data: { ...existing, student_dictation_answer: answer, student_dictation_draft: null } })
+        .eq('session_id', sessionId);
+    } catch (e) {
+      console.error('[Dictation] Submit error', e);
+    }
+    setIsSubmitting(false);
+  };
+
+  const handleTeacherGrantXp = (amount: number) => {
+    addXp(amount);
+  };
+
+  const scoreColor = {
+    exact: 'text-emerald-600 bg-emerald-50 border-emerald-200',
+    partial: 'text-amber-600 bg-amber-50 border-amber-200',
+    wrong: 'text-rose-600 bg-rose-50 border-rose-200',
+  };
+  const scoreLabel = {
+    exact: '✓ Exact',
+    partial: '~ Parțial',
+    wrong: '✗ Greșit',
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-4 px-4 py-2 pb-24">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <h2 className="text-lg font-black text-slate-800 uppercase italic tracking-tighter flex items-center gap-2 flex-1">
+          <Mic className="text-pink-600" size={22} /> Dictation
+        </h2>
+        {onBack && (
+          <button onClick={onBack} className="text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors flex items-center gap-1">
+            ← Dashboard
+          </button>
+        )}
+      </div>
+
+      {isTeacher && (
+        <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-3">
+          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Generează dictare</h3>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 outline-none font-bold text-slate-700 text-sm focus:border-pink-300 transition-colors placeholder:text-slate-300"
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              placeholder="Subiect (opțional — lasă gol pentru random)"
+              onKeyDown={e => e.key === 'Enter' && handleGenerate()}
+            />
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || isCoolingDown}
+              className="flex items-center gap-2 px-5 py-2 bg-pink-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-pink-700 transition-all disabled:opacity-40 shrink-0"
+            >
+              {isGenerating ? <Loader2 className="animate-spin" size={15} /> : isCoolingDown ? <><Clock size={15}/> Cooldown...</> : <><Mic size={15} /> Generează</>}
+            </button>
+            {dictationData && (
+              <button
+                onClick={handleClear}
+                className="px-4 py-2 bg-slate-100 text-slate-400 rounded-xl font-black text-xs hover:bg-rose-50 hover:text-rose-500 transition-all uppercase tracking-widest"
+              >
+                Șterge
+              </button>
+            )}
+          </div>
+          {genError && <p className="text-rose-500 text-xs font-bold">{genError}</p>}
+
+          {/* Sentence — TEACHER ONLY */}
+          {dictationData && (
+            <div className="bg-pink-50 border-2 border-pink-200 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center gap-2 mb-1">
+                <span className="text-[9px] font-black text-pink-600 bg-pink-100 px-2 py-0.5 rounded-full uppercase tracking-widest">TEACHER ONLY</span>
+                <span className="text-[10px] text-slate-400 italic">Citește cu voce tare</span>
+              </div>
+              <p className="text-xl font-black text-slate-800">{dictationData.sentence_en}</p>
+              <p className="text-sm text-slate-500 italic">{dictationData.sentence_ro}</p>
+              <p className="text-[10px] text-pink-500 font-bold">Indiciu RO: {dictationData.hint_ro}</p>
+            </div>
+          )}
+
+          {/* Live typing draft — vizibil profesorului în timp real */}
+          {dictationData && !studentDictationAnswer && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 min-h-[72px]">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Elevul scrie live</span>
+                {studentDictationDraft ? (
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
+                    <span className="text-[9px] font-black text-blue-500 uppercase tracking-widest">Live</span>
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-slate-300 italic">Nicio tastare încă...</span>
+                )}
+              </div>
+              {studentDictationDraft ? (
+                <p className="font-bold text-slate-800 text-sm">{studentDictationDraft}</p>
+              ) : (
+                <p className="text-slate-300 text-sm italic">Așteptând răspunsul elevului...</p>
+              )}
+            </div>
+          )}
+
+          {/* Student answer visible to teacher */}
+          {studentDictationAnswer && (
+            <div className="space-y-2">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Răspunsul elevului</h4>
+              <div className={`border rounded-2xl p-4 space-y-2 ${scoreColor[studentDictationAnswer.score]}`}>
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-black px-2 py-0.5 rounded-full border ${scoreColor[studentDictationAnswer.score]}`}>
+                    {scoreLabel[studentDictationAnswer.score]}
+                  </span>
+                </div>
+                <p className="font-bold text-sm">&ldquo;{studentDictationAnswer.text}&rdquo;</p>
+                <p className="text-xs">{studentDictationAnswer.feedback_en}</p>
+              </div>
+              <div className="flex gap-2 mt-1">
+                <button
+                  onClick={() => handleTeacherGrantXp(150)}
+                  className="flex-1 py-2 bg-emerald-600 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-emerald-700 transition-all"
+                >
+                  +150 XP Exact
+                </button>
+                <button
+                  onClick={() => handleTeacherGrantXp(75)}
+                  className="flex-1 py-2 bg-amber-500 text-white rounded-xl font-black text-xs uppercase tracking-widest hover:bg-amber-600 transition-all"
+                >
+                  +75 XP Parțial
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Student side */}
+      {!isTeacher && (
+        <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-4">
+          {!dictationData ? (
+            <WaitingForTeacher module="dictation" />
+          ) : studentDictationAnswer ? (
+            <div className="space-y-3 text-center">
+              <div className={`inline-block border rounded-2xl px-5 py-3 ${scoreColor[studentDictationAnswer.score]}`}>
+                <p className="text-lg font-black">{scoreLabel[studentDictationAnswer.score]}</p>
+              </div>
+              <p className="text-sm text-slate-600">{studentDictationAnswer.feedback_ro}</p>
+              <p className="text-xs text-slate-400">Răspunsul tău: <span className="italic">&ldquo;{studentDictationAnswer.text}&rdquo;</span></p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4 text-center">
+                <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-1">Indiciu</p>
+                <p className="text-sm font-bold text-slate-700 italic">{dictationData.hint_ro}</p>
+              </div>
+              <p className="text-sm text-slate-600 text-center font-bold">Scrie ce auzi:</p>
+              <textarea
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none font-bold text-slate-800 text-sm resize-none focus:border-pink-400 transition-colors"
+                rows={4}
+                value={studentText}
+                onChange={e => {
+                  const val = e.target.value;
+                  setStudentText(val);
+                  // Trimite draft live la profesor (debounce 500ms)
+                  if (draftSyncRef.current) clearTimeout(draftSyncRef.current);
+                  draftSyncRef.current = setTimeout(async () => {
+                    const { data: cur } = await supabase
+                      .from('session_state')
+                      .select('exercise_data')
+                      .eq('session_id', sessionId)
+                      .maybeSingle();
+                    const ex = typeof cur?.exercise_data === 'object' && cur.exercise_data !== null
+                      ? (cur.exercise_data as Record<string, unknown>) : {};
+                    await supabase.from('session_state')
+                      .update({ exercise_data: { ...ex, student_dictation_draft: val } })
+                      .eq('session_id', sessionId);
+                  }, 500);
+                }}
+                placeholder="Scrie propoziția dictată..."
+                disabled={isSubmitting}
+              />
+              <button
+                onClick={handleStudentSubmit}
+                disabled={!studentText.trim() || isSubmitting}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-pink-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-pink-700 transition-all disabled:opacity-40"
+              >
+                {isSubmitting ? <Loader2 className="animate-spin" size={15} /> : <><Send size={15} /> Trimite</>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Teacher Control Panel ────────────────────────────────────────────────────
 function TeacherControlPanel({
   currentView,
@@ -1879,6 +2388,7 @@ function TeacherControlPanel({
     { id: 'puzzle' as const, label: 'PUZZLE', icon: PuzzleIcon },
     { id: 'arena' as const, label: 'QUEST', icon: Sword },
     { id: 'tense_arena' as const, label: 'TIME', icon: Clock },
+    { id: 'dictation' as const, label: 'DICT', icon: Mic },
   ];
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-[28px] px-5 py-3 shadow-2xl flex items-center gap-5 z-50">
@@ -1966,6 +2476,7 @@ export default function DashboardPage() {
   const [student, setStudent] = useState<Student | null>(null);
   const [vocabularyLoot, setVocabularyLoot] = useState<string[]>([]);
   const [xpToast, setXpToast] = useState<number | null>(null);
+  const [showLevelUp, setShowLevelUp] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [selectedDBStudent, setSelectedDBStudent] = useState<DBStudent | null>(null);
   const [profileError, setProfileError] = useState('');
@@ -1974,6 +2485,13 @@ export default function DashboardPage() {
   });
   const [sessionClosedVisible, setSessionClosedVisible] = useState(false);
   const sessionClosedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sessionStartXpRef = useRef<number | null>(null);
+  const lastVoyagerVocabRef = useRef<{ en: string; ro: string }[]>([]);
+  const [sessionEndStats, setSessionEndStats] = useState<{
+    xpEarned: number;
+    correctAnswers: number;
+    vocabulary: { en: string; ro: string }[];
+  } | null>(null);
   const [studentLocalView, setStudentLocalView] = useState<SessionState['current_view'] | null>(null);
   const [cachedVoyagerImageUrl, setCachedVoyagerImageUrl] = useState<string | null>(() => {
     try { return localStorage.getItem(LS.voyagerImageUrl); } catch { return null; }
@@ -1998,10 +2516,51 @@ export default function DashboardPage() {
     setDebugErrors([]);
     setProfileError('');
     setSessionClosedVisible(false);
+    setSessionEndStats(null);
   }, []);
 
   // ── Sincronizează flagul de mute la nivelul modulului sound.ts ──────────────
   useEffect(() => { setSoundMuted(soundMuted); }, [soundMuted]);
+
+  // ── Capturăm XP-ul de start sesiune (pentru End Screen) ──────────────────────
+  useEffect(() => {
+    if (screen === 'app' && !isTeacher && student && sessionStartXpRef.current === null) {
+      sessionStartXpRef.current = student.xp;
+    }
+    if (screen !== 'app') {
+      sessionStartXpRef.current = null;
+      lastVoyagerVocabRef.current = [];
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [screen, isTeacher]);
+
+  // ── Salvăm vocabularul Voyager curent (pentru End Screen) ─────────────────────
+  useEffect(() => {
+    if (!liveState || isTeacher) return;
+    const ed = liveState.exercise_data as Record<string, unknown>;
+    const vd = ed?.voyager_data;
+    if (vd && typeof vd === 'object' && !Array.isArray(vd)) {
+      const vocab = (vd as { vocabulary?: { en: string; ro: string }[] }).vocabulary;
+      if (vocab && vocab.length > 0) {
+        lastVoyagerVocabRef.current = vocab;
+      }
+    }
+  }, [liveState, isTeacher]);
+
+  // ── Detectare Level Up ────────────────────────────────────────────────────────
+  const prevXpForLevelRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (!student || isTeacher || screen !== 'app') return;
+    const prevXp = prevXpForLevelRef.current;
+    prevXpForLevelRef.current = student.xp;
+    if (prevXp === null || prevXp === student.xp) return;
+    const oldLevel = Math.floor(prevXp / 1000);
+    const newLevel = Math.floor(student.xp / 1000);
+    if (newLevel > oldLevel) {
+      setShowLevelUp(true);
+      setTimeout(() => setShowLevelUp(false), 3500);
+    }
+  }, [student?.xp, student, isTeacher, screen]);
 
   const handleToggleSound = () => {
     const next = !soundMuted;
@@ -2224,6 +2783,17 @@ export default function DashboardPage() {
     const ed = liveState.exercise_data;
     if (ed && typeof ed === 'object' && (ed as Record<string, unknown>).session_closed === true) {
       if (sessionClosedTimerRef.current) return; // timer deja pornit, ignorăm
+
+      // Calculăm statisticile sesiunii pentru End Screen
+      const xpEarned = Math.max(0, (student?.xp ?? 0) - (sessionStartXpRef.current ?? 0));
+      const rawTTAnswers = (ed as Record<string, unknown>).student_time_travel_answers;
+      const ttAnswers = rawTTAnswers && typeof rawTTAnswers === 'object'
+        ? (rawTTAnswers as { lockedAnswers?: (number | null)[] })
+        : null;
+      const correctAnswers = ttAnswers?.lockedAnswers?.filter((a) => a !== null).length ?? 0;
+      const vocabulary = lastVoyagerVocabRef.current.slice(0, 5);
+
+      setSessionEndStats({ xpEarned, correctAnswers, vocabulary });
       setSessionClosedVisible(true);
       sessionClosedTimerRef.current = setTimeout(() => {
         sessionClosedTimerRef.current = null;
@@ -2231,9 +2801,9 @@ export default function DashboardPage() {
         clearStoredSession();
         resetAppState();
         setScreen('landing');
-      }, 3000);
+      }, 6000);
     }
-  }, [liveState, screen, isTeacher, resetAppState]);
+  }, [liveState, screen, isTeacher, resetAppState, student]);
 
   // ── Auto-save skills elev (debounce 2s) — XP NU se persistă, e per-sesiune ───
   const autoSaveRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2580,13 +3150,29 @@ export default function DashboardPage() {
       ? (rawStudentTTAnswers as StudentTimeTravelAnswers)
       : null;
 
+  const rawDictation = ed.dictation_data;
+  const dictationData: DictationData | null =
+    rawDictation && typeof rawDictation === 'object' && !Array.isArray(rawDictation)
+      ? (rawDictation as DictationData)
+      : null;
+
+  const rawStudentDictation = ed.student_dictation_answer;
+  const studentDictationAnswer: StudentDictationAnswer | null =
+    rawStudentDictation && typeof rawStudentDictation === 'object' && !Array.isArray(rawStudentDictation)
+      ? (rawStudentDictation as StudentDictationAnswer)
+      : null;
+
+  const studentDictationDraft: string | null =
+    typeof ed.student_dictation_draft === 'string' ? ed.student_dictation_draft : null;
+
   // ── App principal ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-pink-200 selection:text-pink-900 font-sans antialiased overflow-x-hidden">
       {/* Overlay sesiune închisă (pentru elev) */}
-      {sessionClosedVisible && <SessionClosedOverlay />}
+      {sessionClosedVisible && <SessionClosedOverlay stats={sessionEndStats} />}
 
       {xpToast !== null && <XpToast amount={xpToast} onDone={() => setXpToast(null)} />}
+      {showLevelUp && <LevelUpToast onDone={() => setShowLevelUp(false)} />}
 
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur border-b border-slate-100">
         <div className="max-w-5xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
@@ -2663,9 +3249,11 @@ export default function DashboardPage() {
             isTeacher={isTeacher}
             onResetXp={isTeacher ? resetXp : undefined}
             onAdjustSkill={isTeacher ? adjustSkill : undefined}
+            onGoToPortfolio={isTeacher ? () => setScreen('teacher-home') : undefined}
           />
         )}
         {currentView === 'puzzle' && (
+          <ErrorBoundary moduleName="Puzzle">
           <PuzzleView
             student={student}
             onBack={isTeacher ? () => changeView('dashboard') : undefined}
@@ -2677,8 +3265,10 @@ export default function DashboardPage() {
             studentProgress={studentPuzzleProgress}
             showTranslation={puzzleShowTranslation}
           />
+          </ErrorBoundary>
         )}
         {currentView === 'voyager' && (
+          <ErrorBoundary moduleName="Voyager">
           <VoyagerView
             student={student}
             onBack={isTeacher ? () => changeView('dashboard') : undefined}
@@ -2690,8 +3280,10 @@ export default function DashboardPage() {
             studentTaskProgress={studentVoyagerTasks}
             cachedImageUrl={cachedVoyagerImageUrl}
           />
+          </ErrorBoundary>
         )}
         {currentView === 'arena' && (
+          <ErrorBoundary moduleName="Quest">
           <ArenaView
             student={student}
             onBack={isTeacher ? () => changeView('dashboard') : undefined}
@@ -2702,8 +3294,10 @@ export default function DashboardPage() {
             addXp={addXp}
             studentBoosterProgress={studentQuestBoosters}
           />
+          </ErrorBoundary>
         )}
         {currentView === 'tense_arena' && (
+          <ErrorBoundary moduleName="Time Travel">
           <TimeTravelView
             studentLevel={student.level}
             ageSegment={student.age_segment ?? 'adult'}
@@ -2714,6 +3308,22 @@ export default function DashboardPage() {
             addXp={addXp}
             studentAnswers={studentTimeTravelAnswers}
           />
+          </ErrorBoundary>
+        )}
+        {currentView === 'dictation' && (
+          <ErrorBoundary moduleName="Dictation">
+          <DictationView
+            student={student}
+            onBack={isTeacher ? () => changeView('dashboard') : undefined}
+            isTeacher={isTeacher}
+            sessionId={sessionId}
+            dictationData={dictationData}
+            onDictationGenerated={() => {}}
+            addXp={addXp}
+            studentDictationAnswer={studentDictationAnswer}
+            studentDictationDraft={studentDictationDraft}
+          />
+          </ErrorBoundary>
         )}
       </main>
 

@@ -13,10 +13,17 @@ export type Session = {
 
 export type SessionState = {
   session_id: string;
-  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena';
+  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena' | 'dictation';
   exercise_data: Record<string, unknown>;
   teacher_pings: unknown[];
   updated_at: string;
+};
+
+export type VocabWord = {
+  en: string;
+  ro: string;
+  source: 'voyager' | 'quest';
+  date: string;
 };
 
 export type Student = {
@@ -26,6 +33,8 @@ export type Student = {
   age_segment: 'child' | 'teenager' | 'adult';
   xp: number;
   skills: { speaking: number; grammar: number; vocabulary: number };
+  notes: string;
+  vocabulary: VocabWord[];
   created_at: string;
 };
 
@@ -66,6 +75,21 @@ export type TimeTravelItem = {
 };
 
 export type TimeTravelData = TimeTravelItem[];
+
+export type DictationData = {
+  sentence_en: string;
+  sentence_ro: string;
+  hint_ro: string;
+  topic: string;
+};
+
+export type StudentDictationAnswer = {
+  text: string;
+  score: 'exact' | 'partial' | 'wrong';
+  feedback_en: string;
+  feedback_ro: string;
+  submitted_at: string;
+};
 
 // Erori structurate pentru debug panel
 export type DebugError = {

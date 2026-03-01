@@ -2,7 +2,8 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase/client';
-import type { PuzzleData, VoyagerData, QuestData, TimeTravelData } from '@/types/database';
+import type { PuzzleData, VoyagerData, QuestData, TimeTravelData, VocabWord } from '@/types/database';
+import { PuzzleSchema, VoyagerSchema, QuestSchema, TimeTravelSchema, DictationSchema, DictationEvalSchema } from '@/lib/geminiSchemas';
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
@@ -82,7 +83,12 @@ Where sentence_ro is a natural Romanian translation of the full English sentence
     : `Create puzzle about: "${topic}"`;
   const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const raw = JSON.parse(text) as PuzzleData & { chosen_topic?: string };
+  const parsed = PuzzleSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    console.error('[Puzzle] Schema validation failed:', parsed.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const raw = parsed.data;
   const chosenTopic = topic.trim() || raw.chosen_topic || 'Random puzzle';
   const puzzle: PuzzleData = {
     sentence: raw.sentence,
@@ -188,7 +194,12 @@ Rules:
     : `Create visual scene about: "${topic}"`;
   const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const raw = JSON.parse(text) as Omit<VoyagerData, 'image_url' | 'image_path'> & { chosen_topic?: string };
+  const parsedV = VoyagerSchema.safeParse(JSON.parse(text));
+  if (!parsedV.success) {
+    console.error('[Voyager] Schema validation failed:', parsedV.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const raw = parsedV.data;
   const chosenTopic = topic.trim() || raw.chosen_topic || 'Random scene';
   const { chosen_topic: _ct, ...generatedFields } = raw;
   const generated = generatedFields as Omit<VoyagerData, 'image_url' | 'image_path'>;
@@ -339,7 +350,12 @@ Rules:
     : `Create quest for: "${topic}"`;
   const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
-  const raw = JSON.parse(text) as QuestData & { chosen_topic?: string };
+  const parsedQ = QuestSchema.safeParse(JSON.parse(text));
+  if (!parsedQ.success) {
+    console.error('[Quest] Schema validation failed:', parsedQ.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const raw = parsedQ.data;
   const chosenTopic = topic.trim() || raw.chosen_topic || 'Random quest';
   const { chosen_topic: _ct, ...questFields } = raw;
   const quest = questFields as QuestData;
@@ -420,9 +436,13 @@ ${specialStructureInstructions}`,
 
   const result = await model.generateContent(prompt);
   const text = result.response.text();
-  const raw = JSON.parse(text) as { chosen_topic?: string; exercises: TimeTravelData };
-  const data: TimeTravelData = raw.exercises;
-  const chosenTopic = raw.chosen_topic ?? topic ?? '';
+  const parsedTT = TimeTravelSchema.safeParse(JSON.parse(text));
+  if (!parsedTT.success) {
+    console.error('[TimeTravel] Schema validation failed:', parsedTT.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const data: TimeTravelData = parsedTT.data.exercises;
+  const chosenTopic = parsedTT.data.chosen_topic ?? topic ?? '';
 
   await mergeExerciseData(sessionId, { time_travel_data: data });
   return { data, chosenTopic };
@@ -430,4 +450,127 @@ ${specialStructureInstructions}`,
 
 export async function clearTimeTravelContent(sessionId: string): Promise<void> {
   await mergeExerciseData(sessionId, { time_travel_data: null, student_time_travel_answers: null });
+}
+
+// ─── Student Notes ─────────────────────────────────────────────────────────────
+export async function updateStudentNotes(
+  studentId: string,
+  notes: string
+): Promise<{ error?: string }> {
+  const { error } = await supabase
+    .from('students')
+    .update({ notes })
+    .eq('id', studentId);
+  if (error) return { error: error.message };
+  return {};
+}
+
+// ─── Vocabulary Bank ──────────────────────────────────────────────────────────
+export async function addVocabularyToStudent(
+  studentId: string,
+  words: VocabWord[]
+): Promise<{ error?: string }> {
+  // Read current vocabulary, append new words (avoid duplicates by 'en' key)
+  const { data, error: fetchErr } = await supabase
+    .from('students')
+    .select('vocabulary')
+    .eq('id', studentId)
+    .maybeSingle();
+
+  if (fetchErr) return { error: fetchErr.message };
+
+  const existing: VocabWord[] = Array.isArray(data?.vocabulary) ? (data.vocabulary as VocabWord[]) : [];
+  const existingEn = new Set(existing.map(w => w.en.toLowerCase()));
+  const newWords = words.filter(w => !existingEn.has(w.en.toLowerCase()));
+
+  if (newWords.length === 0) return {};
+
+  const merged = [...newWords, ...existing]; // newest first
+
+  const { error: updateErr } = await supabase
+    .from('students')
+    .update({ vocabulary: merged })
+    .eq('id', studentId);
+
+  if (updateErr) return { error: updateErr.message };
+  return {};
+}
+
+// ─── Dictation ────────────────────────────────────────────────────────────────
+export async function generateDictationContent(
+  sessionId: string,
+  topic: string,
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+): Promise<{ data: { sentence_en: string; sentence_ro: string; hint_ro: string; topic: string } }> {
+  const isRandom = !topic.trim();
+  const genAI = getGenAI();
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an Expert English Teacher creating dictation exercises.
+Student level: ${level} (CEFR).
+${getAgeInstruction(ageSegment)}
+
+Generate ONE clear English sentence suitable for dictation at the student's level.
+${isRandom ? 'Pick ONE topic from the curated age-appropriate list above.' : `Topic: "${topic}".`}
+
+Rules:
+- sentence_en: 8–15 words, natural and clear (no contractions at A1/A2), ends with correct punctuation
+- sentence_ro: accurate natural Romanian translation
+- hint_ro: a short Romanian hint about the topic/context (NOT a translation), 5–8 words
+- topic: short English label for the topic (2–4 words)
+
+Return ONLY valid JSON (no markdown):
+{ "sentence_en": "...", "sentence_ro": "...", "hint_ro": "...", "topic": "..." }`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.8 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const contentPrompt = isRandom
+    ? 'Create a dictation sentence — choose a suitable topic'
+    : `Create dictation sentence about: "${topic}"`;
+  const result = await model.generateContent(contentPrompt);
+  const text = result.response.text();
+  const parsedD = DictationSchema.safeParse(JSON.parse(text));
+  if (!parsedD.success) {
+    console.error('[Dictation] Schema validation failed:', parsedD.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const dictData = { ...parsedD.data, topic: parsedD.data.topic ?? (topic || 'Dictation') };
+
+  await mergeExerciseData(sessionId, { dictation_data: dictData, student_dictation_answer: null, student_dictation_draft: null });
+  return { data: dictData };
+}
+
+export async function clearDictationContent(sessionId: string): Promise<void> {
+  await mergeExerciseData(sessionId, { dictation_data: null, student_dictation_answer: null, student_dictation_draft: null });
+}
+
+export async function evaluateDictationAnswer(
+  original: string,
+  studentAnswer: string
+): Promise<{ score: 'exact' | 'partial' | 'wrong'; feedback_en: string; feedback_ro: string }> {
+  const genAI = getGenAI();
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an English teacher evaluating a dictation exercise.
+
+Compare the student's answer to the original sentence and evaluate:
+- "exact": student's answer matches the original (allow minor punctuation differences)
+- "partial": student got the main idea but has errors (spelling, missing words, wrong words)
+- "wrong": student answer is mostly incorrect or off-topic
+
+Return ONLY valid JSON:
+{ "score": "exact"|"partial"|"wrong", "feedback_en": "short feedback in English (1-2 sentences)", "feedback_ro": "same feedback in Romanian" }`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const prompt = `Original: "${original}"\nStudent's answer: "${studentAnswer}"`;
+  const result = await model.generateContent(prompt);
+  const text = result.response.text();
+  const parsedE = DictationEvalSchema.safeParse(JSON.parse(text));
+  if (!parsedE.success) {
+    console.error('[DictationEval] Schema validation failed:', parsedE.error.issues);
+    return { score: 'wrong', feedback_en: 'Could not evaluate. Please try again.', feedback_ro: 'Nu s-a putut evalua. Reîncercați.' };
+  }
+  return parsedE.data;
 }
