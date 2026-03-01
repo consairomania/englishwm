@@ -71,3 +71,25 @@ export const DictationEvalSchema = z.object({
   feedback_en: z.string().min(1),
   feedback_ro: z.string().min(1),
 });
+
+// ─── Writing ──────────────────────────────────────────────────────────────────
+export const WritingPromptSchema = z.object({
+  chosen_topic: z.string().optional(),
+  prompt_en: z.string().min(1),
+  prompt_ro: z.string().min(1),
+  example_en: z.string().min(1),
+  topic: z.string().min(1),
+});
+
+export const WritingFeedbackSchema = z.object({
+  grammar_errors: z.array(
+    z.object({ error: z.string(), correction: z.string() })
+  ),
+  vocabulary_suggestions: z.array(
+    z.object({ original: z.string(), better: z.string() })
+  ),
+  cefr_estimate: z.string().min(1),
+  overall_comment_en: z.string().min(1),
+  overall_comment_ro: z.string().min(1),
+  score: z.number().int().min(0).max(100),
+});

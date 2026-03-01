@@ -39,6 +39,8 @@ import {
   Shuffle,
   Users,
   Mic,
+  PenLine,
+  Star,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -61,7 +63,7 @@ import {
   updateStudentDetails,
   getStudentById,
 } from '@/lib/studentService';
-import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData, DictationData, StudentDictationAnswer, VocabWord, SessionLog } from '@/types/database';
+import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData, DictationData, StudentDictationAnswer, VocabWord, SessionLog, WritingData, WritingFeedback, StudentWritingAnswer } from '@/types/database';
 import {
   generatePuzzleContent,
   clearPuzzleContent,
@@ -76,9 +78,12 @@ import {
   generateDictationContent,
   clearDictationContent,
   evaluateDictationAnswer,
+  generateWritingPrompt,
+  clearWritingContent,
+  evaluateWriting,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
-import { saveSessionLog, getSessionLogs } from '@/app/actions/sessionActions';
+import { saveSessionLog, getSessionLogs, getAllRecentSessionLogs } from '@/app/actions/sessionActions';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const teacherPhoto =
@@ -301,9 +306,11 @@ function TeacherLogin({ onSuccess, onBack }: { onSuccess: () => void; onBack: ()
 function TeacherHome({
   onOpenRoom,
   onBack,
+  backLabel = '← Înapoi',
 }: {
   onOpenRoom: (student: DBStudent) => void;
   onBack: () => void;
+  backLabel?: string;
 }) {
   const [students, setStudents] = useState<DBStudent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -324,6 +331,9 @@ function TeacherHome({
   const [historyStudentId, setHistoryStudentId] = useState<string | null>(null);
   const [historyLogs, setHistoryLogs] = useState<SessionLog[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'students' | 'dashboard'>('students');
+  const [dashboardLogs, setDashboardLogs] = useState<SessionLog[]>([]);
+  const [dashboardLoading, setDashboardLoading] = useState(false);
 
   useEffect(() => {
     getAllStudents().then((data) => {
@@ -331,6 +341,15 @@ function TeacherHome({
       setLoading(false);
     });
   }, []);
+
+  const handleSwitchToDashboard = async () => {
+    setActiveTab('dashboard');
+    if (dashboardLogs.length > 0) return;
+    setDashboardLoading(true);
+    const logs = await getAllRecentSessionLogs(120);
+    setDashboardLogs(logs);
+    setDashboardLoading(false);
+  };
 
   const handleAdd = async () => {
     if (!newName.trim()) { setAddError('Introdu un nume valid.'); return; }
@@ -426,6 +445,154 @@ function TeacherHome({
           </p>
         </div>
 
+        {/* Tab switcher */}
+        <div className="flex bg-slate-100 rounded-2xl p-1 gap-1">
+          <button
+            onClick={() => setActiveTab('students')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${activeTab === 'students' ? 'bg-white text-pink-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            <Users size={13} /> Elevi
+          </button>
+          <button
+            onClick={handleSwitchToDashboard}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${activeTab === 'dashboard' ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            <Trophy size={13} /> Dashboard
+          </button>
+        </div>
+
+        {/* ── Dashboard Agregat ─────────────────────────────────────────────────── */}
+        {activeTab === 'dashboard' && (
+          <div className="space-y-4">
+            {dashboardLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="animate-spin text-violet-400" size={22} />
+              </div>
+            ) : dashboardLogs.length === 0 ? (
+              <div className="bg-white rounded-[24px] p-8 shadow-lg border border-slate-50 text-center space-y-2">
+                <p className="text-3xl">📊</p>
+                <p className="text-sm font-bold text-slate-500">Nicio sesiune înregistrată încă.</p>
+                <p className="text-xs text-slate-400">Logurile apar după prima sesiune completă.</p>
+              </div>
+            ) : (() => {
+              // Agregare per student
+              const byStudent: Record<string, { logs: SessionLog[]; totalXp: number; totalSessions: number; lastDate: string; moduleCount: Record<string, number>; vocabCount: number }> = {};
+              for (const log of dashboardLogs) {
+                if (!log.student_id) continue;
+                if (!byStudent[log.student_id]) {
+                  byStudent[log.student_id] = { logs: [], totalXp: 0, totalSessions: 0, lastDate: '', moduleCount: {}, vocabCount: 0 };
+                }
+                const entry = byStudent[log.student_id];
+                entry.logs.push(log);
+                entry.totalXp += log.xp_earned;
+                entry.totalSessions += 1;
+                if (!entry.lastDate || log.date > entry.lastDate) entry.lastDate = log.date;
+                for (const m of log.modules_used) entry.moduleCount[m] = (entry.moduleCount[m] ?? 0) + 1;
+                entry.vocabCount += log.vocabulary_learned.length;
+              }
+              const ranked = Object.entries(byStudent)
+                .map(([studentId, data]) => {
+                  const student = students.find(s => s.id === studentId);
+                  return { studentId, student, ...data };
+                })
+                .sort((a, b) => b.totalXp - a.totalXp);
+              const maxXp = Math.max(...ranked.map(r => r.totalXp), 1);
+              const moduleIcons: Record<string, string> = { puzzle: '🧩', voyager: '🌍', arena: '⚔️', tense_arena: '⏰', dictation: '🎙️', writing: '✍️' };
+              return (
+                <div className="space-y-3">
+                  <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest flex items-center gap-2">
+                        <Trophy size={11} className="text-violet-500" /> Clasament XP
+                      </h3>
+                      <span className="text-[9px] text-slate-300 italic">ultimele {dashboardLogs.length} sesiuni</span>
+                    </div>
+                    {ranked.map((r, i) => {
+                      const pct = Math.round((r.totalXp / maxXp) * 100);
+                      const topModules = Object.entries(r.moduleCount).sort((a, b) => b[1] - a[1]).slice(0, 3);
+                      return (
+                        <div key={r.studentId} className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className={`text-[10px] font-black w-5 ${i === 0 ? 'text-amber-500' : i === 1 ? 'text-slate-400' : i === 2 ? 'text-amber-700' : 'text-slate-300'}`}>#{i + 1}</span>
+                              <p className="font-black text-slate-800 text-sm">{r.student?.name ?? r.studentId.slice(0, 8)}</p>
+                              <span className="text-[9px] font-black text-slate-300 bg-slate-100 px-1.5 py-0.5 rounded">{r.student?.level ?? '?'}</span>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-sm font-black text-violet-700">{r.totalXp} XP</p>
+                              <p className="text-[9px] text-slate-400">{r.totalSessions} sesiuni</p>
+                            </div>
+                          </div>
+                          {/* XP bar */}
+                          <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                            <div
+                              className="h-full rounded-full bg-gradient-to-r from-violet-400 to-pink-500 transition-all duration-700"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          {/* Module chips + stats */}
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {topModules.map(([m, count]) => (
+                              <span key={m} className="flex items-center gap-0.5 text-[9px] bg-slate-50 border border-slate-100 rounded-lg px-1.5 py-0.5 font-bold text-slate-500">
+                                {moduleIcons[m] ?? '📚'} ×{count}
+                              </span>
+                            ))}
+                            {r.vocabCount > 0 && (
+                              <span className="text-[9px] text-emerald-600 bg-emerald-50 border border-emerald-100 rounded-lg px-1.5 py-0.5 font-bold">
+                                {r.vocabCount} cuvinte
+                              </span>
+                            )}
+                            <span className="text-[9px] text-slate-300 ml-auto">
+                              Ultima: {r.lastDate}
+                            </span>
+                          </div>
+                          {/* Mini sessions bar chart — last 6 */}
+                          {r.logs.length > 1 && (
+                            <div className="flex items-end gap-0.5 h-6 mt-0.5">
+                              {r.logs.slice(0, 6).reverse().map((log, li) => {
+                                const maxLogXp = Math.max(...r.logs.slice(0, 6).map(l => l.xp_earned), 1);
+                                const barPct = Math.max((log.xp_earned / maxLogXp) * 100, 8);
+                                return (
+                                  <div key={li} className="flex-1 flex flex-col justify-end" title={`${log.date}: ${log.xp_earned} XP`}>
+                                    <div className="w-full rounded-t bg-violet-300" style={{ height: `${barPct}%` }} />
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Global stats */}
+                  <div className="grid grid-cols-3 gap-2">
+                    {[
+                      { label: 'Sesiuni totale', value: dashboardLogs.length, color: 'text-violet-700 bg-violet-50 border-violet-100' },
+                      { label: 'XP total acordat', value: dashboardLogs.reduce((s, l) => s + l.xp_earned, 0), color: 'text-pink-700 bg-pink-50 border-pink-100' },
+                      { label: 'Cuvinte învățate', value: dashboardLogs.reduce((s, l) => s + l.vocabulary_learned.length, 0), color: 'text-emerald-700 bg-emerald-50 border-emerald-100' },
+                    ].map(stat => (
+                      <div key={stat.label} className={`rounded-2xl border p-3 text-center ${stat.color}`}>
+                        <p className="text-xl font-black">{stat.value}</p>
+                        <p className="text-[8px] font-black uppercase tracking-widest opacity-70 mt-0.5">{stat.label}</p>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => { setDashboardLogs([]); handleSwitchToDashboard(); }}
+                    className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-violet-600 transition-colors py-1 flex items-center justify-center gap-1.5"
+                  >
+                    <RefreshCw size={11} /> Reîncarcă date
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        )}
+
+        {activeTab === 'students' && (
+        <div className="space-y-5">
         <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-3">
           <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             Selectează elevul pentru lecție
@@ -671,7 +838,7 @@ function TeacherHome({
                         return (
                           <div key={log.id} className="bg-white rounded-xl px-3 py-2 flex items-start gap-3 border border-violet-100">
                             <div className="shrink-0 text-center">
-                              <p className="text-[10px] font-black text-slate-500">{log.date.slice(5)}</p>
+                              <p className="text-[10px] font-black text-slate-500">{log.date.slice(8)}-{log.date.slice(5, 7)}</p>
                               <p className="text-[9px] text-slate-300">{log.date.slice(0, 4)}</p>
                             </div>
                             <div className="flex-1 min-w-0">
@@ -705,12 +872,14 @@ function TeacherHome({
             ))}
           </div>
         )}
+        </div>
+        )}
 
         <button
           onClick={onBack}
           className="w-full text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors py-2"
         >
-          ← Înapoi
+          {backLabel}
         </button>
       </div>
     </div>
@@ -1246,6 +1415,15 @@ const WAITING_CONFIGS: Record<string, { icon: string; messages: string[] }> = {
       'Profesorul pregătește dictarea...',
       'Fii atent la ce auzi!',
       'Exercițiul de dictare e aproape gata...',
+      'Pregătește-te să scrii!',
+    ],
+  },
+  writing: {
+    icon: '✍️',
+    messages: [
+      'Profesorul pregătește subiectul...',
+      'Se formulează prompt-ul de scriere...',
+      'Exercițiul de writing e aproape gata...',
       'Pregătește-te să scrii!',
     ],
   },
@@ -2463,6 +2641,331 @@ function DictationView({
   );
 }
 
+// ─── Writing View ─────────────────────────────────────────────────────────────
+function WritingView({
+  student,
+  onBack,
+  isTeacher,
+  sessionId,
+  writingData,
+  addXp,
+  studentWritingAnswer,
+  studentWritingDraft,
+}: {
+  student: Student;
+  onBack?: () => void;
+  isTeacher: boolean;
+  sessionId: string;
+  writingData: WritingData | null;
+  addXp: (amount: number) => void;
+  studentWritingAnswer?: StudentWritingAnswer | null;
+  studentWritingDraft?: string | null;
+}) {
+  const [topic, setTopic] = useState('');
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isCoolingDown, setIsCoolingDown] = useState(false);
+  const [genError, setGenError] = useState('');
+  const [studentText, setStudentText] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showExample, setShowExample] = useState(false);
+  const writingCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setStudentText('');
+    setShowExample(false);
+  }, [writingData?.prompt_en]);
+
+  const handleGenerate = async () => {
+    if (isGenerating || isCoolingDown) return;
+    setIsGenerating(true);
+    setGenError('');
+    try {
+      await generateWritingPrompt(sessionId, topic.trim(), student.level, student.age_segment);
+      setTopic('');
+    } catch (e) {
+      setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
+    }
+    setIsGenerating(false);
+    if (writingCooldownRef.current) clearTimeout(writingCooldownRef.current);
+    setIsCoolingDown(true);
+    writingCooldownRef.current = setTimeout(() => setIsCoolingDown(false), 4000);
+  };
+
+  const handleClear = async () => {
+    await clearWritingContent(sessionId);
+  };
+
+  const handleStudentSubmit = async () => {
+    if (!studentText.trim() || !writingData || isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const feedback = await evaluateWriting(writingData.prompt_en, studentText.trim(), student.level);
+      const answer: StudentWritingAnswer = {
+        text: studentText.trim(),
+        feedback,
+        submitted_at: new Date().toISOString(),
+      };
+      const { data: cur } = await supabase
+        .from('session_state')
+        .select('exercise_data')
+        .eq('session_id', sessionId)
+        .maybeSingle();
+      const ex = typeof cur?.exercise_data === 'object' && cur.exercise_data !== null
+        ? (cur.exercise_data as Record<string, unknown>) : {};
+      await supabase.from('session_state')
+        .update({ exercise_data: { ...ex, student_writing_answer: answer, student_writing_draft: null } })
+        .eq('session_id', sessionId);
+    } catch (e) {
+      console.error('[Writing] Submit error', e);
+    }
+    setIsSubmitting(false);
+  };
+
+  const scoreColor = (score: number) =>
+    score >= 80 ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
+    : score >= 60 ? 'text-amber-600 bg-amber-50 border-amber-200'
+    : 'text-rose-600 bg-rose-50 border-rose-200';
+
+  const scoreLabel = (score: number) =>
+    score >= 80 ? 'Excelent' : score >= 60 ? 'Bine' : 'De îmbunătățit';
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-4 px-4 py-2 pb-24">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <h2 className="text-lg font-black text-slate-800 uppercase italic tracking-tighter flex items-center gap-2 flex-1">
+          <PenLine className="text-violet-600" size={22} /> Writing
+        </h2>
+        {onBack && (
+          <button onClick={onBack} className="text-slate-400 font-bold text-xs uppercase tracking-widest hover:text-slate-600 transition-colors flex items-center gap-1">
+            ← Dashboard
+          </button>
+        )}
+      </div>
+
+      {isTeacher && (
+        <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-3">
+          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Generează prompt</h3>
+          <div className="flex gap-2">
+            <input
+              className="flex-1 px-4 py-2 rounded-xl bg-slate-50 border border-slate-200 outline-none font-bold text-slate-700 text-sm focus:border-violet-300 transition-colors placeholder:text-slate-300"
+              value={topic}
+              onChange={e => setTopic(e.target.value)}
+              placeholder="Subiect (opțional — lasă gol pentru random)"
+              onKeyDown={e => e.key === 'Enter' && handleGenerate()}
+            />
+            <button
+              onClick={handleGenerate}
+              disabled={isGenerating || isCoolingDown}
+              className="flex items-center gap-2 px-5 py-2 bg-violet-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-40 shrink-0"
+            >
+              {isGenerating ? <Loader2 className="animate-spin" size={15} /> : isCoolingDown ? <><Clock size={15}/> Cooldown...</> : <><PenLine size={15} /> Generează</>}
+            </button>
+            {writingData && (
+              <button
+                onClick={handleClear}
+                className="px-4 py-2 bg-slate-100 text-slate-400 rounded-xl font-black text-xs hover:bg-rose-50 hover:text-rose-500 transition-all uppercase tracking-widest"
+              >
+                Șterge
+              </button>
+            )}
+          </div>
+          {genError && <p className="text-rose-500 text-xs font-bold">{genError}</p>}
+
+          {/* Prompt + exemplu — TEACHER ONLY */}
+          {writingData && (
+            <div className="bg-violet-50 border-2 border-violet-200 rounded-2xl p-4 space-y-2">
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[9px] font-black text-violet-600 bg-violet-100 px-2 py-0.5 rounded-full uppercase tracking-widest">PROMPT</span>
+                <span className="text-[10px] text-slate-400 italic">Subiect: {writingData.topic}</span>
+              </div>
+              <p className="text-base font-black text-slate-800">{writingData.prompt_en}</p>
+              <p className="text-sm text-slate-500 italic">{writingData.prompt_ro}</p>
+              <button
+                onClick={() => setShowExample(v => !v)}
+                className="text-[10px] font-black text-violet-500 uppercase tracking-widest hover:text-violet-700 transition-colors"
+              >
+                {showExample ? '▲ Ascunde exemplu' : '▼ Vezi exemplu răspuns'}
+              </button>
+              {showExample && (
+                <div className="bg-white/70 rounded-xl p-3 border border-violet-100 mt-1">
+                  <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest mb-1">Exemplu model</p>
+                  <p className="text-sm text-slate-700 italic">{writingData.example_en}</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Live draft profesorului */}
+          {writingData && !studentWritingAnswer && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 min-h-[72px]">
+              <div className="flex items-center gap-2 mb-2">
+                <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Elevul scrie live</span>
+                {studentWritingDraft ? (
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 bg-violet-500 rounded-full animate-pulse" />
+                    <span className="text-[9px] font-black text-violet-500 uppercase tracking-widest">Live</span>
+                  </span>
+                ) : (
+                  <span className="text-[9px] text-slate-300 italic">Nicio tastare încă...</span>
+                )}
+              </div>
+              {studentWritingDraft ? (
+                <p className="font-bold text-slate-800 text-sm whitespace-pre-wrap">{studentWritingDraft}</p>
+              ) : (
+                <p className="text-slate-300 text-sm italic">Așteptând răspunsul elevului...</p>
+              )}
+            </div>
+          )}
+
+          {/* Răspuns evaluat + XP */}
+          {studentWritingAnswer && (
+            <div className="space-y-3">
+              <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Răspunsul elevului</h4>
+              <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+                <p className="text-sm text-slate-700 italic whitespace-pre-wrap">&ldquo;{studentWritingAnswer.text}&rdquo;</p>
+              </div>
+              <WritingFeedbackCard feedback={studentWritingAnswer.feedback} />
+              <div className="flex gap-2 flex-wrap mt-1">
+                {[300, 200, 150, 100].map(xp => (
+                  <button
+                    key={xp}
+                    onClick={() => addXp(xp)}
+                    className={`flex-1 min-w-[80px] py-2 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${
+                      xp === 300 ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                      : xp === 200 ? 'bg-violet-600 hover:bg-violet-700 text-white'
+                      : xp === 150 ? 'bg-amber-500 hover:bg-amber-600 text-white'
+                      : 'bg-slate-200 hover:bg-slate-300 text-slate-700'
+                    }`}
+                  >
+                    +{xp} XP
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Student side */}
+      {!isTeacher && (
+        <div className="bg-white rounded-[24px] p-5 shadow-lg border border-slate-50 space-y-4">
+          {!writingData ? (
+            <WaitingForTeacher module="writing" />
+          ) : studentWritingAnswer ? (
+            <div className="space-y-4">
+              <div className={`border rounded-2xl p-4 text-center ${scoreColor(studentWritingAnswer.feedback.score)}`}>
+                <p className="text-3xl font-black">{studentWritingAnswer.feedback.score}<span className="text-lg">/100</span></p>
+                <p className="text-sm font-bold mt-1">{scoreLabel(studentWritingAnswer.feedback.score)}</p>
+                <p className="text-[11px] mt-0.5 opacity-70">CEFR estimat: {studentWritingAnswer.feedback.cefr_estimate}</p>
+              </div>
+              <p className="text-sm text-slate-600 text-center">{studentWritingAnswer.feedback.overall_comment_ro}</p>
+              <WritingFeedbackCard feedback={studentWritingAnswer.feedback} />
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="bg-violet-50 border border-violet-100 rounded-2xl p-4">
+                <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-2">Subiect</p>
+                <p className="text-base font-black text-slate-800">{writingData.prompt_en}</p>
+                <p className="text-sm text-slate-500 italic mt-1">{writingData.prompt_ro}</p>
+              </div>
+              <textarea
+                className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none font-medium text-slate-800 text-sm resize-none focus:border-violet-400 transition-colors leading-relaxed"
+                rows={7}
+                value={studentText}
+                onChange={e => {
+                  const val = e.target.value;
+                  setStudentText(val);
+                  if (draftSyncRef.current) clearTimeout(draftSyncRef.current);
+                  draftSyncRef.current = setTimeout(async () => {
+                    const { data: cur } = await supabase
+                      .from('session_state')
+                      .select('exercise_data')
+                      .eq('session_id', sessionId)
+                      .maybeSingle();
+                    const ex = typeof cur?.exercise_data === 'object' && cur.exercise_data !== null
+                      ? (cur.exercise_data as Record<string, unknown>) : {};
+                    await supabase.from('session_state')
+                      .update({ exercise_data: { ...ex, student_writing_draft: val } })
+                      .eq('session_id', sessionId);
+                  }, 500);
+                }}
+                placeholder="Scrie răspunsul tău în engleză..."
+                disabled={isSubmitting}
+              />
+              <div className="flex items-center justify-between text-[10px] text-slate-400">
+                <span>{studentText.split(/\s+/).filter(Boolean).length} cuvinte</span>
+                <span>Apasă Trimite când ești gata</span>
+              </div>
+              <button
+                onClick={handleStudentSubmit}
+                disabled={!studentText.trim() || isSubmitting}
+                className="w-full flex items-center justify-center gap-2 py-3 bg-violet-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-40"
+              >
+                {isSubmitting ? <><Loader2 className="animate-spin" size={15} /> Se evaluează...</> : <><Send size={15} /> Trimite pentru evaluare</>}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function WritingFeedbackCard({ feedback }: { feedback: WritingFeedback }) {
+  return (
+    <div className="space-y-3">
+      {/* Score + CEFR */}
+      <div className="flex gap-2">
+        <div className="flex-1 bg-violet-50 border border-violet-100 rounded-xl p-3 text-center">
+          <p className="text-[9px] font-black text-violet-400 uppercase tracking-widest">Scor</p>
+          <p className="text-2xl font-black text-violet-700">{feedback.score}<span className="text-sm">/100</span></p>
+        </div>
+        <div className="flex-1 bg-slate-50 border border-slate-100 rounded-xl p-3 text-center">
+          <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest">CEFR estimat</p>
+          <p className="text-2xl font-black text-slate-700">{feedback.cefr_estimate}</p>
+        </div>
+      </div>
+
+      {/* Comment */}
+      <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-3">
+        <p className="text-[9px] font-black text-emerald-500 uppercase tracking-widest mb-1">Feedback</p>
+        <p className="text-sm text-slate-700">{feedback.overall_comment_en}</p>
+      </div>
+
+      {/* Grammar errors */}
+      {feedback.grammar_errors.length > 0 && (
+        <div className="bg-rose-50 border border-rose-100 rounded-xl p-3 space-y-2">
+          <p className="text-[9px] font-black text-rose-500 uppercase tracking-widest">Greșeli gramaticale</p>
+          {feedback.grammar_errors.map((e, i) => (
+            <div key={i} className="flex items-start gap-2 text-xs">
+              <span className="text-rose-500 font-bold shrink-0 line-through">{e.error}</span>
+              <span className="text-slate-400">→</span>
+              <span className="text-emerald-700 font-bold">{e.correction}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Vocabulary suggestions */}
+      {feedback.vocabulary_suggestions.length > 0 && (
+        <div className="bg-amber-50 border border-amber-100 rounded-xl p-3 space-y-2">
+          <p className="text-[9px] font-black text-amber-500 uppercase tracking-widest">Vocabular mai bun</p>
+          {feedback.vocabulary_suggestions.map((s, i) => (
+            <div key={i} className="flex items-center gap-2 text-xs">
+              <span className="text-slate-500 font-bold">{s.original}</span>
+              <span className="text-slate-400">→</span>
+              <Star size={10} className="text-amber-500 shrink-0" />
+              <span className="text-amber-700 font-black">{s.better}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Teacher Control Panel ────────────────────────────────────────────────────
 function TeacherControlPanel({
   currentView,
@@ -2482,6 +2985,7 @@ function TeacherControlPanel({
     { id: 'arena' as const, label: 'QUEST', icon: Sword },
     { id: 'tense_arena' as const, label: 'TIME', icon: Clock },
     { id: 'dictation' as const, label: 'DICT', icon: Mic },
+    { id: 'writing' as const, label: 'WRITE', icon: PenLine },
   ];
   return (
     <div className="fixed bottom-4 left-1/2 -translate-x-1/2 bg-white/95 backdrop-blur-xl border border-slate-200 rounded-[28px] px-5 py-3 shadow-2xl flex items-center gap-5 z-50">
@@ -2561,6 +3065,7 @@ function DebugPanel({ errors }: { errors: DebugError[] }) {
 // ─── Root Page ────────────────────────────────────────────────────────────────
 export default function DashboardPage() {
   const [screen, setScreen] = useState<AppScreen>('restoring');
+  const [portfolioReturnScreen, setPortfolioReturnScreen] = useState<AppScreen | null>(null);
   const [isTeacher, setIsTeacher] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
@@ -3001,6 +3506,7 @@ export default function DashboardPage() {
             existing.quest_data ? 'arena' : null,
             existing.time_travel_data ? 'tense_arena' : null,
             existing.dictation_data ? 'dictation' : null,
+            existing.writing_data ? 'writing' : null,
           ] as (string | null)[]
         ).filter((m): m is string => m !== null);
         saveSessionLog({
@@ -3183,7 +3689,13 @@ export default function DashboardPage() {
     return <TeacherLogin onSuccess={handleTeacherLoginSuccess} onBack={() => setScreen('landing')} />;
   }
   if (screen === 'teacher-home') {
-    return <TeacherHome onOpenRoom={handleSelectStudent} onBack={() => setScreen('teacher-login')} />;
+    return (
+      <TeacherHome
+        onOpenRoom={handleSelectStudent}
+        onBack={() => setScreen(portfolioReturnScreen ?? 'teacher-login')}
+        backLabel={portfolioReturnScreen === 'app' ? '← Înapoi la sesiune' : '← Înapoi'}
+      />
+    );
   }
   if (screen === 'room-setup') {
     return (
@@ -3286,6 +3798,21 @@ export default function DashboardPage() {
   const studentDictationDraft: string | null =
     typeof ed.student_dictation_draft === 'string' ? ed.student_dictation_draft : null;
 
+  const rawWriting = ed.writing_data;
+  const writingData: WritingData | null =
+    rawWriting && typeof rawWriting === 'object' && !Array.isArray(rawWriting)
+      ? (rawWriting as WritingData)
+      : null;
+
+  const rawStudentWriting = ed.student_writing_answer;
+  const studentWritingAnswer: StudentWritingAnswer | null =
+    rawStudentWriting && typeof rawStudentWriting === 'object' && !Array.isArray(rawStudentWriting)
+      ? (rawStudentWriting as StudentWritingAnswer)
+      : null;
+
+  const studentWritingDraft: string | null =
+    typeof ed.student_writing_draft === 'string' ? ed.student_writing_draft : null;
+
   // ── App principal ─────────────────────────────────────────────────────────────
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-slate-900 selection:bg-pink-200 selection:text-pink-900 font-sans antialiased overflow-x-hidden">
@@ -3370,7 +3897,7 @@ export default function DashboardPage() {
             isTeacher={isTeacher}
             onResetXp={isTeacher ? resetXp : undefined}
             onAdjustSkill={isTeacher ? adjustSkill : undefined}
-            onGoToPortfolio={isTeacher ? () => setScreen('teacher-home') : undefined}
+            onGoToPortfolio={isTeacher ? () => { setPortfolioReturnScreen(screen); setScreen('teacher-home'); } : undefined}
           />
         )}
         {currentView === 'puzzle' && (
@@ -3443,6 +3970,20 @@ export default function DashboardPage() {
             addXp={addXp}
             studentDictationAnswer={studentDictationAnswer}
             studentDictationDraft={studentDictationDraft}
+          />
+          </ErrorBoundary>
+        )}
+        {currentView === 'writing' && (
+          <ErrorBoundary moduleName="Writing">
+          <WritingView
+            student={student}
+            onBack={isTeacher ? () => changeView('dashboard') : undefined}
+            isTeacher={isTeacher}
+            sessionId={sessionId}
+            writingData={writingData}
+            addXp={addXp}
+            studentWritingAnswer={studentWritingAnswer}
+            studentWritingDraft={studentWritingDraft}
           />
           </ErrorBoundary>
         )}

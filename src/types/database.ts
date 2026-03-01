@@ -13,7 +13,7 @@ export type Session = {
 
 export type SessionState = {
   session_id: string;
-  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena' | 'dictation';
+  current_view: 'dashboard' | 'puzzle' | 'voyager' | 'arena' | 'tense_arena' | 'dictation' | 'writing';
   exercise_data: Record<string, unknown>;
   teacher_pings: unknown[];
   updated_at: string;
@@ -102,6 +102,28 @@ export type SessionLog = {
   tenses_practiced: string[];
   notes: string;
   created_at: string;
+};
+
+export type WritingData = {
+  prompt_en: string;
+  prompt_ro: string;
+  example_en: string;
+  topic: string;
+};
+
+export type WritingFeedback = {
+  grammar_errors: { error: string; correction: string }[];
+  vocabulary_suggestions: { original: string; better: string }[];
+  cefr_estimate: string;
+  overall_comment_en: string;
+  overall_comment_ro: string;
+  score: number;
+};
+
+export type StudentWritingAnswer = {
+  text: string;
+  feedback: WritingFeedback;
+  submitted_at: string;
 };
 
 // Erori structurate pentru debug panel

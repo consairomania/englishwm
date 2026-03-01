@@ -2,8 +2,8 @@
 
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase/client';
-import type { PuzzleData, VoyagerData, QuestData, TimeTravelData, VocabWord } from '@/types/database';
-import { PuzzleSchema, VoyagerSchema, QuestSchema, TimeTravelSchema, DictationSchema, DictationEvalSchema } from '@/lib/geminiSchemas';
+import type { PuzzleData, VoyagerData, QuestData, TimeTravelData, VocabWord, WritingData, WritingFeedback } from '@/types/database';
+import { PuzzleSchema, VoyagerSchema, QuestSchema, TimeTravelSchema, DictationSchema, DictationEvalSchema, WritingPromptSchema, WritingFeedbackSchema } from '@/lib/geminiSchemas';
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
@@ -573,4 +573,106 @@ Return ONLY valid JSON:
     return { score: 'wrong', feedback_en: 'Could not evaluate. Please try again.', feedback_ro: 'Nu s-a putut evalua. Reîncercați.' };
   }
   return parsedE.data;
+}
+
+// ─── Writing ──────────────────────────────────────────────────────────────────
+export async function generateWritingPrompt(
+  sessionId: string,
+  topic: string,
+  level: string,
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+): Promise<{ data: WritingData; chosenTopic: string }> {
+  const isRandom = !topic.trim();
+  const genAI = getGenAI();
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an Expert English Teacher creating writing prompts for one-on-one lessons.
+The student's level is ${level} (CEFR: A1–C2). Adjust prompt complexity accordingly.
+${getAgeInstruction(ageSegment)}
+
+For A1–A2: short, simple prompts (3–5 sentences expected from student).
+For B1–B2: medium prompts (1 paragraph expected, 60–100 words).
+For C1–C2: rich prompts (1–2 paragraphs expected, 100–150 words).
+
+Return ONLY valid JSON (no markdown):
+{
+  "chosen_topic": "...",
+  "prompt_en": "The full writing prompt in English (1-2 sentences)",
+  "prompt_ro": "The same prompt translated to Romanian",
+  "example_en": "A short example answer at the correct level (1-3 sentences for A1-A2, longer for higher levels)",
+  "topic": "Short topic label (2-4 words)"
+}`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.85 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const contentPrompt = isRandom
+    ? 'Create a writing prompt — choose a suitable topic'
+    : `Create a writing prompt about: "${topic}"`;
+  const result = await model.generateContent(contentPrompt);
+  const text = result.response.text();
+  const parsed = WritingPromptSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    console.error('[Writing] Schema validation failed:', parsed.error.issues);
+    throw new Error('Conținut invalid generat. Reîncercați.');
+  }
+  const writingData: WritingData = {
+    prompt_en: parsed.data.prompt_en,
+    prompt_ro: parsed.data.prompt_ro,
+    example_en: parsed.data.example_en,
+    topic: parsed.data.topic,
+  };
+
+  await mergeExerciseData(sessionId, { writing_data: writingData, student_writing_answer: null, student_writing_draft: null });
+  return { data: writingData, chosenTopic: parsed.data.chosen_topic ?? parsed.data.topic };
+}
+
+export async function clearWritingContent(sessionId: string): Promise<void> {
+  await mergeExerciseData(sessionId, { writing_data: null, student_writing_answer: null, student_writing_draft: null });
+}
+
+export async function evaluateWriting(
+  prompt: string,
+  studentText: string,
+  level: string
+): Promise<WritingFeedback> {
+  const genAI = getGenAI();
+  const model = genAI.getGenerativeModel({
+    model: GEMINI_TEXT_MODEL,
+    systemInstruction: `You are an Expert English Teacher evaluating a student's written response.
+The student's level is ${level} (CEFR: A1–C2).
+
+Evaluate the student's writing and return ONLY valid JSON (no markdown):
+{
+  "grammar_errors": [{ "error": "the exact wrong text", "correction": "the corrected version" }],
+  "vocabulary_suggestions": [{ "original": "simpler word student used", "better": "more appropriate/advanced word" }],
+  "cefr_estimate": "A1"|"A2"|"B1"|"B2"|"C1"|"C2",
+  "overall_comment_en": "Encouraging 2-3 sentence comment on the writing in English",
+  "overall_comment_ro": "Same comment in Romanian",
+  "score": 0-100
+}
+
+Rules:
+- grammar_errors: up to 4 most important errors only; empty array if none
+- vocabulary_suggestions: up to 3 suggestions only; empty array if vocabulary is already good
+- score: 90-100 for excellent, 70-89 for good, 50-69 for needs improvement, below 50 for major issues
+- Be encouraging and constructive in comments`,
+    generationConfig: { responseMimeType: 'application/json', temperature: 0.3 },
+  } as Parameters<typeof genAI.getGenerativeModel>[0]);
+
+  const evalPrompt = `Writing prompt: "${prompt}"\n\nStudent's answer: "${studentText}"`;
+  const result = await model.generateContent(evalPrompt);
+  const text = result.response.text();
+  const parsed = WritingFeedbackSchema.safeParse(JSON.parse(text));
+  if (!parsed.success) {
+    console.error('[Writing] Feedback schema validation failed:', parsed.error.issues);
+    return {
+      grammar_errors: [],
+      vocabulary_suggestions: [],
+      cefr_estimate: level,
+      overall_comment_en: 'Could not evaluate writing. Please try again.',
+      overall_comment_ro: 'Nu s-a putut evalua. Reîncercați.',
+      score: 0,
+    };
+  }
+  return parsed.data;
 }

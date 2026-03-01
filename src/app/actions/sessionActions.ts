@@ -39,3 +39,16 @@ export async function getSessionLogs(studentId: string): Promise<SessionLog[]> {
   }
   return (data ?? []) as SessionLog[];
 }
+
+export async function getAllRecentSessionLogs(limit = 120): Promise<SessionLog[]> {
+  const { data, error } = await supabase
+    .from('session_logs')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  if (error) {
+    console.warn('[SessionLog] Eroare la fetch all:', error.message);
+    return [];
+  }
+  return (data ?? []) as SessionLog[];
+}
