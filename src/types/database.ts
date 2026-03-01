@@ -126,6 +126,21 @@ export type StudentWritingAnswer = {
   submitted_at: string;
 };
 
+export type HomeworkAssignment = {
+  id: string;
+  code: string;
+  student_id: string;
+  teacher_id: string;
+  exercises: Record<string, unknown>;
+  modules: string[];
+  due_date: string | null;
+  completed: boolean;
+  student_answers: Record<string, unknown>;
+  xp_earned: number;
+  created_at: string;
+  completed_at: string | null;
+};
+
 // Erori structurate pentru debug panel
 export type DebugError = {
   source: string;

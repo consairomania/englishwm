@@ -41,6 +41,9 @@ import {
   Mic,
   PenLine,
   Star,
+  ExternalLink,
+  Copy,
+  CheckCheck,
 } from 'lucide-react';
 import { useSyncSession } from '@/hooks/useSyncSession';
 import { supabase } from '@/lib/supabase/client';
@@ -84,6 +87,8 @@ import {
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 import { saveSessionLog, getSessionLogs, getAllRecentSessionLogs } from '@/app/actions/sessionActions';
+import { createHomework, getTeacherHomework } from '@/app/actions/homework';
+import type { HomeworkAssignment } from '@/types/database';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const teacherPhoto =
@@ -331,9 +336,11 @@ function TeacherHome({
   const [historyStudentId, setHistoryStudentId] = useState<string | null>(null);
   const [historyLogs, setHistoryLogs] = useState<SessionLog[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState<'students' | 'dashboard'>('students');
+  const [activeTab, setActiveTab] = useState<'students' | 'dashboard' | 'homework'>('students');
   const [dashboardLogs, setDashboardLogs] = useState<SessionLog[]>([]);
   const [dashboardLoading, setDashboardLoading] = useState(false);
+  const [homeworkList, setHomeworkList] = useState<HomeworkAssignment[]>([]);
+  const [homeworkLoading, setHomeworkLoading] = useState(false);
 
   useEffect(() => {
     getAllStudents().then((data) => {
@@ -349,6 +356,15 @@ function TeacherHome({
     const logs = await getAllRecentSessionLogs(120);
     setDashboardLogs(logs);
     setDashboardLoading(false);
+  };
+
+  const handleSwitchToHomework = async () => {
+    setActiveTab('homework');
+    if (homeworkList.length > 0) return;
+    setHomeworkLoading(true);
+    const list = await getTeacherHomework('medea');
+    setHomeworkList(list);
+    setHomeworkLoading(false);
   };
 
   const handleAdd = async () => {
@@ -457,7 +473,13 @@ function TeacherHome({
             onClick={handleSwitchToDashboard}
             className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${activeTab === 'dashboard' ? 'bg-white text-violet-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
           >
-            <Trophy size={13} /> Dashboard
+            <Trophy size={13} /> Stats
+          </button>
+          <button
+            onClick={handleSwitchToHomework}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-xs uppercase tracking-widest transition-all ${activeTab === 'homework' ? 'bg-white text-emerald-600 shadow-sm' : 'text-slate-400 hover:text-slate-600'}`}
+          >
+            <BookOpen size={13} /> Teme
           </button>
         </div>
 
@@ -588,6 +610,104 @@ function TeacherHome({
                 </div>
               );
             })()}
+          </div>
+        )}
+
+        {/* ── Teme trimise ─────────────────────────────────────────────────────── */}
+        {activeTab === 'homework' && (
+          <div className="space-y-3">
+            {homeworkLoading ? (
+              <div className="flex items-center justify-center py-10">
+                <Loader2 className="animate-spin text-emerald-400" size={22} />
+              </div>
+            ) : homeworkList.length === 0 ? (
+              <div className="bg-white rounded-[24px] p-8 shadow-lg border border-slate-50 text-center space-y-2">
+                <p className="text-3xl">📭</p>
+                <p className="text-sm font-bold text-slate-500">Nicio temă trimisă încă.</p>
+                <p className="text-xs text-slate-400">Folosește butonul 📤 din sesiune pentru a trimite exerciții ca temă.</p>
+                <a
+                  href="/homework"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest mt-2 hover:underline"
+                >
+                  <ExternalLink size={11} /> Pagina elevului: /homework
+                </a>
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between">
+                  <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
+                    {homeworkList.length} temă{homeworkList.length !== 1 ? 'e' : ''} trimise
+                  </p>
+                  <button
+                    onClick={() => { setHomeworkList([]); handleSwitchToHomework(); }}
+                    className="text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-emerald-600 transition-colors flex items-center gap-1"
+                  >
+                    <RefreshCw size={10} /> Reîncarcă
+                  </button>
+                </div>
+                {homeworkList.map((hw) => {
+                  const student = students.find((s) => s.id === hw.student_id);
+                  const moduleIcons: Record<string, string> = { tense_arena: '⏰', puzzle: '🧩', dictation: '🎙️', writing: '✍️' };
+                  return (
+                    <div key={hw.id} className="bg-white rounded-[20px] px-5 py-4 shadow-lg border border-slate-50 space-y-2">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-black text-slate-800 text-sm">{student?.name ?? 'Elev necunoscut'}</p>
+                          <p className="text-[9px] text-slate-400 uppercase tracking-widest font-bold">{hw.created_at.slice(0, 10)}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span className={`text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-widest ${hw.completed ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                            {hw.completed ? '✓ Rezolvată' : '⏳ Aștept...'}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3 flex-wrap">
+                        <div className="flex items-center gap-1 bg-slate-900 text-white rounded-lg px-3 py-1">
+                          <span className="font-black text-sm tracking-widest">{hw.code}</span>
+                          <button
+                            onClick={() => navigator.clipboard.writeText(hw.code)}
+                            className="text-slate-400 hover:text-white transition-colors ml-1"
+                          >
+                            <Copy size={11} />
+                          </button>
+                        </div>
+                        <div className="flex gap-1">
+                          {hw.modules.map((m) => (
+                            <span key={m} className="text-sm" title={m}>{moduleIcons[m] ?? '📚'}</span>
+                          ))}
+                        </div>
+                        {hw.completed && (
+                          <span className="text-xs font-black text-violet-700 ml-auto">+{hw.xp_earned} XP</span>
+                        )}
+                      </div>
+                      {hw.completed && typeof hw.student_answers === 'object' && hw.student_answers !== null && (() => {
+                        const ans = hw.student_answers as Record<string, unknown>;
+                        const ttScore = ans.time_travel_score as string | undefined;
+                        const puzzleCorrect = ans.puzzle_correct as boolean | undefined;
+                        const writingFb = ans.writing_feedback as { score?: number } | undefined;
+                        return (
+                          <div className="flex flex-wrap gap-1.5 pt-1">
+                            {ttScore && <span className="text-[9px] bg-indigo-50 border border-indigo-100 text-indigo-700 rounded-lg px-2 py-0.5 font-bold">⏰ {ttScore}</span>}
+                            {puzzleCorrect !== undefined && <span className={`text-[9px] rounded-lg px-2 py-0.5 font-bold border ${puzzleCorrect ? 'bg-emerald-50 border-emerald-100 text-emerald-700' : 'bg-rose-50 border-rose-100 text-rose-700'}`}>🧩 {puzzleCorrect ? 'OK' : 'Greșit'}</span>}
+                            {writingFb?.score !== undefined && <span className="text-[9px] bg-violet-50 border border-violet-100 text-violet-700 rounded-lg px-2 py-0.5 font-bold">✍️ {writingFb.score}/100</span>}
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  );
+                })}
+                <a
+                  href="/homework"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest py-2 hover:underline"
+                >
+                  <ExternalLink size={11} /> Pagina elevului: /homework
+                </a>
+              </>
+            )}
           </div>
         )}
 
@@ -2972,11 +3092,17 @@ function TeacherControlPanel({
   onChangeView,
   isSaving,
   roomCode,
+  onSendHomework,
+  homeworkSending,
+  hasExerciseData,
 }: {
   currentView: SessionState['current_view'];
   onChangeView: (view: SessionState['current_view']) => void;
   isSaving: boolean;
   roomCode: string;
+  onSendHomework?: () => void;
+  homeworkSending?: boolean;
+  hasExerciseData?: boolean;
 }) {
   const views = [
     { id: 'dashboard' as const, label: 'DASH', icon: User },
@@ -3008,6 +3134,17 @@ function TeacherControlPanel({
           </button>
         );
       })}
+      {onSendHomework && (
+        <button
+          onClick={onSendHomework}
+          disabled={!hasExerciseData || homeworkSending || isSaving}
+          className="flex flex-col items-center gap-0.5 transition-all duration-200 hover:scale-110 active:scale-95 disabled:opacity-30 text-emerald-600 hover:text-emerald-700"
+          title="Trimite ca temă"
+        >
+          {homeworkSending ? <Loader2 size={20} className="animate-spin" /> : <BookOpen size={20} />}
+          <span className="font-black uppercase text-[7px] tracking-widest">TEMĂ</span>
+        </button>
+      )}
       {isSaving && <Loader2 size={14} className="animate-spin text-pink-400 shrink-0" />}
     </div>
   );
@@ -3066,6 +3203,9 @@ function DebugPanel({ errors }: { errors: DebugError[] }) {
 export default function DashboardPage() {
   const [screen, setScreen] = useState<AppScreen>('restoring');
   const [portfolioReturnScreen, setPortfolioReturnScreen] = useState<AppScreen | null>(null);
+  const [homeworkCode, setHomeworkCode] = useState<string | null>(null);
+  const [homeworkSending, setHomeworkSending] = useState(false);
+  const [hwCopied, setHwCopied] = useState(false);
   const [isTeacher, setIsTeacher] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [roomCode, setRoomCode] = useState<string>('');
@@ -3669,6 +3809,32 @@ export default function DashboardPage() {
     await updateStudentProgress(student.dbId, 0, initialSkills);
   }, [student?.dbId]);
 
+  const handleSendHomework = useCallback(async () => {
+    if (!student || homeworkSending) return;
+    setHomeworkSending(true);
+    try {
+      const ex = localSession?.exercise_data ?? {};
+      const exercises: Record<string, unknown> = {};
+      const modules: string[] = [];
+      if (ex.time_travel_data) { exercises.time_travel_data = ex.time_travel_data; modules.push('tense_arena'); }
+      if (ex.puzzle_data) { exercises.puzzle_data = ex.puzzle_data; modules.push('puzzle'); }
+      if (ex.dictation_data) { exercises.dictation_data = ex.dictation_data; modules.push('dictation'); }
+      if (ex.writing_data) { exercises.writing_data = ex.writing_data; modules.push('writing'); }
+      exercises.level = student.level;
+      if (modules.length === 0) return;
+      const { code } = await createHomework({
+        studentId: student.dbId,
+        teacherId: 'medea',
+        exercises,
+        modules,
+      });
+      setHomeworkCode(code);
+    } catch (e) {
+      console.error('[Homework] create error', e);
+    }
+    setHomeworkSending(false);
+  }, [student, localSession, homeworkSending]);
+
   // Navigare unificată: profesor → update DB + Realtime; elev → navigare locală
   const handleNavigate = useCallback((view: SessionState['current_view']) => {
     if (isTeacher) {
@@ -3996,9 +4162,55 @@ export default function DashboardPage() {
             onChangeView={changeView}
             isSaving={isSaving}
             roomCode={roomCode}
+            onSendHomework={handleSendHomework}
+            homeworkSending={homeworkSending}
+            hasExerciseData={!!(
+              localSession?.exercise_data?.time_travel_data ||
+              localSession?.exercise_data?.puzzle_data ||
+              localSession?.exercise_data?.dictation_data ||
+              localSession?.exercise_data?.writing_data
+            )}
           />
           <DebugPanel errors={debugErrors} />
         </>
+      )}
+
+      {/* Homework code modal */}
+      {homeworkCode && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+          <div className="bg-white rounded-[28px] p-8 max-w-sm w-full shadow-2xl space-y-5 text-center">
+            <div className="text-5xl">📤</div>
+            <div>
+              <h3 className="text-xl font-black uppercase italic tracking-tighter text-slate-800">Temă creată!</h3>
+              <p className="text-xs text-slate-400 mt-1">Dă-i elevului acest cod:</p>
+            </div>
+            <div className="bg-slate-900 rounded-2xl p-5">
+              <p className="text-4xl font-black text-white tracking-[0.25em]">{homeworkCode}</p>
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => { navigator.clipboard.writeText(homeworkCode); setHwCopied(true); setTimeout(() => setHwCopied(false), 2000); }}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-xl font-black text-sm uppercase tracking-widest transition-all border ${hwCopied ? 'bg-emerald-50 border-emerald-300 text-emerald-700' : 'border-slate-200 hover:border-violet-300 text-slate-600 hover:text-violet-600'}`}
+              >
+                {hwCopied ? <><CheckCheck size={15} /> Copiat!</> : <><Copy size={15} /> Copiază</>}
+              </button>
+              <button
+                onClick={() => { setHomeworkCode(null); setHwCopied(false); }}
+                className="flex-1 py-2.5 bg-violet-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-violet-700 transition-all"
+              >
+                Gata
+              </button>
+            </div>
+            <a
+              href="/homework"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center justify-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest hover:underline"
+            >
+              <ExternalLink size={11} /> Deschide /homework
+            </a>
+          </div>
+        </div>
       )}
     </div>
   );
