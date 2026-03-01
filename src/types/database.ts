@@ -91,6 +91,19 @@ export type StudentDictationAnswer = {
   submitted_at: string;
 };
 
+export type SessionLog = {
+  id: string;
+  session_id: string;
+  student_id: string;
+  date: string;
+  xp_earned: number;
+  modules_used: string[];
+  vocabulary_learned: { en: string; ro: string }[];
+  tenses_practiced: string[];
+  notes: string;
+  created_at: string;
+};
+
 // Erori structurate pentru debug panel
 export type DebugError = {
   source: string;

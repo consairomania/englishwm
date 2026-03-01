@@ -61,7 +61,7 @@ import {
   updateStudentDetails,
   getStudentById,
 } from '@/lib/studentService';
-import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData, DictationData, StudentDictationAnswer, VocabWord } from '@/types/database';
+import type { SessionState, DebugError, Student as DBStudent, PuzzleData, VoyagerData, QuestData, TimeTravelData, DictationData, StudentDictationAnswer, VocabWord, SessionLog } from '@/types/database';
 import {
   generatePuzzleContent,
   clearPuzzleContent,
@@ -78,6 +78,7 @@ import {
   evaluateDictationAnswer,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
+import { saveSessionLog, getSessionLogs } from '@/app/actions/sessionActions';
 
 // ─── Constante ────────────────────────────────────────────────────────────────
 const teacherPhoto =
@@ -320,6 +321,9 @@ function TeacherHome({
   const [editNotes, setEditNotes] = useState('');
   const [saving, setSaving] = useState(false);
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [historyStudentId, setHistoryStudentId] = useState<string | null>(null);
+  const [historyLogs, setHistoryLogs] = useState<SessionLog[]>([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
 
   useEffect(() => {
     getAllStudents().then((data) => {
@@ -368,6 +372,18 @@ function TeacherHome({
     setEditLevel('');
     setEditAgeSegment('adult');
     setEditNotes('');
+  };
+
+  const handleToggleHistory = async (id: string) => {
+    if (historyStudentId === id) {
+      setHistoryStudentId(null);
+      return;
+    }
+    setHistoryStudentId(id);
+    setHistoryLoading(true);
+    const logs = await getSessionLogs(id);
+    setHistoryLogs(logs);
+    setHistoryLoading(false);
   };
 
   const handleNotesChange = (id: string, value: string) => {
@@ -496,7 +512,8 @@ function TeacherHome({
               Toți elevii ({students.length})
             </h3>
             {sortedStudents.map((s) => (
-              <div key={s.id} className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100">
+              <div key={s.id} className="space-y-1">
+              <div className="bg-slate-50 px-4 py-3 rounded-xl border border-slate-100">
                 {editingId === s.id ? (
                   <div className="space-y-2">
                     <input
@@ -590,6 +607,13 @@ function TeacherHome({
                       ) : (
                         <>
                           <button
+                            onClick={() => handleToggleHistory(s.id)}
+                            className={`p-2 rounded-xl border transition-all ${historyStudentId === s.id ? 'bg-violet-600 text-white border-violet-600' : 'bg-white hover:bg-violet-50 text-slate-300 hover:text-violet-500 border-slate-100'}`}
+                            title="Istoric sesiuni"
+                          >
+                            <Clock size={14} />
+                          </button>
+                          <button
                             onClick={() => handleStartEdit(s)}
                             className="p-2 rounded-xl bg-white hover:bg-blue-50 text-slate-300 hover:text-blue-500 transition-all border border-slate-100"
                             title="Editează"
@@ -608,6 +632,75 @@ function TeacherHome({
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Panou istoric sesiuni */}
+              {historyStudentId === s.id && (
+                <div className="bg-violet-50 border border-violet-100 rounded-xl px-4 py-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black text-violet-600 uppercase tracking-widest flex items-center gap-1.5">
+                      <Clock size={11} /> Istoric sesiuni — {s.name}
+                    </span>
+                    {historyLoading && <Loader2 size={12} className="animate-spin text-violet-400" />}
+                  </div>
+                  {!historyLoading && historyLogs.length === 0 && (
+                    <p className="text-xs text-slate-400 italic">Nicio sesiune înregistrată încă.</p>
+                  )}
+                  {!historyLoading && historyLogs.length > 0 && (
+                    <div className="space-y-2">
+                      {/* Mini XP chart — ultimele 8 sesiuni */}
+                      {historyLogs.length > 1 && (
+                        <div className="flex items-end gap-1 h-10">
+                          {historyLogs.slice(0, 8).reverse().map((log, i) => {
+                            const maxXp = Math.max(...historyLogs.slice(0, 8).map(l => l.xp_earned), 1);
+                            const pct = Math.max((log.xp_earned / maxXp) * 100, 4);
+                            return (
+                              <div key={i} className="flex-1 flex flex-col items-center gap-0.5" title={`${log.date}: ${log.xp_earned} XP`}>
+                                <div
+                                  className="w-full rounded-t bg-violet-400 transition-all"
+                                  style={{ height: `${pct}%` }}
+                                />
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                      {/* Timeline */}
+                      {historyLogs.map((log) => {
+                        const moduleIcons: Record<string, string> = { puzzle: '🧩', voyager: '🌍', arena: '⚔️', tense_arena: '⏰', dictation: '🎙️' };
+                        return (
+                          <div key={log.id} className="bg-white rounded-xl px-3 py-2 flex items-start gap-3 border border-violet-100">
+                            <div className="shrink-0 text-center">
+                              <p className="text-[10px] font-black text-slate-500">{log.date.slice(5)}</p>
+                              <p className="text-[9px] text-slate-300">{log.date.slice(0, 4)}</p>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-xs font-black text-violet-700">+{log.xp_earned} XP</span>
+                                <div className="flex gap-0.5">
+                                  {log.modules_used.map(m => (
+                                    <span key={m} title={m} className="text-sm">{moduleIcons[m] ?? '📚'}</span>
+                                  ))}
+                                </div>
+                              </div>
+                              {log.vocabulary_learned.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {log.vocabulary_learned.slice(0, 5).map((w, i) => (
+                                    <span key={i} className="text-[9px] bg-violet-100 text-violet-700 px-1.5 py-0.5 rounded font-bold">{w.en}</span>
+                                  ))}
+                                  {log.vocabulary_learned.length > 5 && (
+                                    <span className="text-[9px] text-slate-400">+{log.vocabulary_learned.length - 5}</span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
               </div>
             ))}
           </div>
@@ -2884,12 +2977,7 @@ export default function DashboardPage() {
     if (progressSyncRef.current) clearTimeout(progressSyncRef.current);
     setIsSaving(true);
     try {
-      // 1. Resetează XP-ul elevului la 0 (XP valid doar per sesiune; skill-urile rămân)
-      if (student?.dbId) {
-        await updateStudentProgress(student.dbId, 0, student.skills);
-      }
-
-      // 2. Șterge imaginea Voyager din Storage (dacă există) și marchează sesiunea ca închisă
+      // 1. Citește exercise_data curent (necesar pentru log + cleanup)
       const { data: current } = await supabase
         .from('session_state')
         .select('exercise_data')
@@ -2899,6 +2987,39 @@ export default function DashboardPage() {
         typeof current?.exercise_data === 'object' && current.exercise_data !== null
           ? (current.exercise_data as Record<string, unknown>)
           : {};
+
+      // 2. Salvează session log (înainte de reset XP, ca să avem XP-ul câștigat)
+      if (student?.dbId && student.xp > 0) {
+        const voyagerForLog = existing.voyager_data as Record<string, unknown> | null | undefined;
+        const vocabLearned = Array.isArray(voyagerForLog?.vocabulary)
+          ? (voyagerForLog!.vocabulary as { en: string; ro: string }[])
+          : [];
+        const modulesUsed = (
+          [
+            existing.puzzle_data ? 'puzzle' : null,
+            existing.voyager_data ? 'voyager' : null,
+            existing.quest_data ? 'arena' : null,
+            existing.time_travel_data ? 'tense_arena' : null,
+            existing.dictation_data ? 'dictation' : null,
+          ] as (string | null)[]
+        ).filter((m): m is string => m !== null);
+        saveSessionLog({
+          session_id: sessionId,
+          student_id: student.dbId,
+          xp_earned: student.xp,
+          modules_used: modulesUsed,
+          vocabulary_learned: vocabLearned,
+          tenses_practiced: [],
+          notes: '',
+        }).catch(console.warn);
+      }
+
+      // 3. Resetează XP-ul elevului la 0 (XP valid doar per sesiune; skill-urile rămân)
+      if (student?.dbId) {
+        await updateStudentProgress(student.dbId, 0, student.skills);
+      }
+
+      // 4. Șterge imaginea Voyager din Storage (dacă există) și marchează sesiunea ca închisă
       const voyagerDataLogout = existing.voyager_data as Record<string, unknown> | null | undefined;
       if (voyagerDataLogout?.image_path && typeof voyagerDataLogout.image_path === 'string') {
         try {
