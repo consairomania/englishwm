@@ -8,25 +8,41 @@ import { playWrongSound } from '@/lib/sound';
 import { supabase } from '@/lib/supabase/client';
 import type { TimeTravelData } from '@/types/database';
 
-const ENGLISH_TENSES = [
-  'Present Simple',
-  'Present Continuous',
-  'Present Perfect',
-  'Present Perfect Continuous',
-  'Past Simple',
-  'Past Continuous',
-  'Past Perfect',
-  'Past Perfect Continuous',
-  'Future Simple (will)',
-  'Future Continuous',
-  'Future Perfect',
-  'Future Perfect Continuous',
-  'First Conditional',
-  'Second Conditional',
-  'Third Conditional',
-] as const;
+type TenseCategory = { label: string; tenses: string[] };
 
-type EnglishTense = typeof ENGLISH_TENSES[number];
+const TENSE_CATEGORIES: TenseCategory[] = [
+  {
+    label: 'Present Tenses',
+    tenses: ['Present Simple', 'Present Continuous', 'Present Perfect', 'Present Perfect Continuous'],
+  },
+  {
+    label: 'Past Tenses',
+    tenses: ['Past Simple', 'Past Continuous', 'Past Perfect', 'Past Perfect Continuous'],
+  },
+  {
+    label: 'Future Tenses',
+    tenses: ['Future Simple (will)', 'Future Continuous', 'Future Perfect', 'Future Perfect Continuous'],
+  },
+  {
+    label: 'Conditionals',
+    tenses: ['Type 0 Conditional', 'First Conditional', 'Second Conditional', 'Third Conditional'],
+  },
+  {
+    label: 'Modal Verbs',
+    tenses: ['Should', 'Would', 'Can', 'Could', 'Used to', 'Have to', 'Need to', 'Must', 'May', 'Might', 'Modal + Present Perfect'],
+  },
+  {
+    label: 'Passive Voice',
+    tenses: ['Present Simple Passive', 'Past Simple Passive', 'Present Perfect Passive', 'Future Simple Passive', 'Past Perfect Passive', 'Present Continuous Passive'],
+  },
+  {
+    label: 'Other Structures',
+    tenses: ['Future in the Past', 'Had better', 'Stative Verbs'],
+  },
+];
+
+const ALL_TENSES = TENSE_CATEGORIES.flatMap((cat) => cat.tenses);
+type EnglishTense = string;
 
 const WRONG_FLASH_MS = 1500;
 const N = 15; // numărul de exerciții generat
@@ -88,6 +104,7 @@ export function TimeTravelView({
   // selectedTenses: [] = Automix (nicio restricție); altfel = tense-urile alese
   const [selectedTenses, setSelectedTenses] = useState<EnglishTense[]>([]);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [openCategories, setOpenCategories] = useState<Set<string>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
   const [genError, setGenError] = useState('');
 
@@ -220,11 +237,27 @@ export function TimeTravelView({
     );
   };
 
+  const toggleCategory = (label: string) =>
+    setOpenCategories((prev) => {
+      const next = new Set(prev);
+      next.has(label) ? next.delete(label) : next.add(label);
+      return next;
+    });
+
+  const toggleCategoryAll = (cat: TenseCategory) => {
+    const allSelected = cat.tenses.every((t) => selectedTenses.includes(t));
+    setSelectedTenses((prev) =>
+      allSelected
+        ? prev.filter((t) => !cat.tenses.includes(t))
+        : [...new Set([...prev, ...cat.tenses])]
+    );
+  };
+
   // ── Etichetă dropdown ─────────────────────────────────────────────────────────
   const dropdownLabel =
     selectedTenses.length === 0
       ? 'Automix'
-      : selectedTenses.length === ENGLISH_TENSES.length
+      : selectedTenses.length === ALL_TENSES.length
         ? 'Toate timpurile'
         : `${selectedTenses.length} timp${selectedTenses.length !== 1 ? 'uri' : ''}`;
 
@@ -278,7 +311,7 @@ export function TimeTravelView({
             />
 
             {/* Dropdown multi-select tense */}
-            <div className="relative sm:w-56" ref={dropdownRef}>
+            <div className="relative sm:w-64" ref={dropdownRef}>
               <button
                 type="button"
                 onClick={() => setIsDropdownOpen((v) => !v)}
@@ -294,7 +327,7 @@ export function TimeTravelView({
 
               {isDropdownOpen && (
                 <div className="absolute top-full mt-1 left-0 w-full bg-white border border-slate-200 rounded-xl shadow-xl z-50 overflow-hidden">
-                  <div className="max-h-64 overflow-y-auto p-2 space-y-0.5">
+                  <div className="max-h-80 overflow-y-auto p-2 space-y-0.5">
                     {/* Automix option */}
                     <label className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer">
                       <input
@@ -306,18 +339,50 @@ export function TimeTravelView({
                       <span className="text-sm font-black text-slate-700">Automix</span>
                     </label>
                     <div className="h-px bg-slate-100 mx-2 my-1" />
-                    {/* Tense-uri individuale */}
-                    {ENGLISH_TENSES.map((t) => (
-                      <label key={t} className="flex items-center gap-2.5 px-3 py-2 rounded-lg hover:bg-indigo-50 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={selectedTenses.includes(t)}
-                          onChange={() => toggleTense(t)}
-                          className="accent-indigo-600 w-3.5 h-3.5"
-                        />
-                        <span className="text-sm font-medium text-slate-600">{t}</span>
-                      </label>
-                    ))}
+                    {/* Categorii accordion */}
+                    {TENSE_CATEGORIES.map((cat) => {
+                      const isOpen = openCategories.has(cat.label);
+                      const allSelected = cat.tenses.every((t) => selectedTenses.includes(t));
+                      return (
+                        <div key={cat.label}>
+                          {/* Header categorie */}
+                          <div
+                            className="flex items-center gap-2 px-3 py-2 rounded-lg hover:bg-slate-50 cursor-pointer select-none"
+                            onClick={() => toggleCategory(cat.label)}
+                          >
+                            <ChevronDown
+                              size={11}
+                              className={`text-slate-400 transition-transform duration-150 shrink-0 ${isOpen ? '' : '-rotate-90'}`}
+                            />
+                            <span className="text-xs font-black text-slate-600 uppercase tracking-wide flex-1">{cat.label}</span>
+                            <input
+                              type="checkbox"
+                              checked={allSelected}
+                              onChange={() => toggleCategoryAll(cat)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="accent-indigo-600 w-3.5 h-3.5 shrink-0"
+                              title="Selectează toate"
+                            />
+                          </div>
+                          {/* Tense-uri individuale */}
+                          {isOpen && (
+                            <div className="ml-4 space-y-0.5">
+                              {cat.tenses.map((t) => (
+                                <label key={t} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg hover:bg-indigo-50 cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={selectedTenses.includes(t)}
+                                    onChange={() => toggleTense(t)}
+                                    className="accent-indigo-600 w-3.5 h-3.5"
+                                  />
+                                  <span className="text-sm font-medium text-slate-600">{t}</span>
+                                </label>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

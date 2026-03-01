@@ -364,16 +364,26 @@ export async function generateTimeTravelContent(
 
   const hasTenseFilter = tenses && tenses.length > 0;
   const tenseConstraint = hasTenseFilter
-    ? `Distribute the 15 exercises RANDOMLY across only these tenses: ${tenses!.join(', ')}.`
+    ? `Distribute the 15 exercises RANDOMLY across only these tenses/structures: ${tenses!.join(', ')}.`
     : 'Vary the tenses freely across all 15 exercises (use a wide mix of different tenses).';
 
   const topicConstraint = topic
     ? `All sentences must relate to this topic or scenario: "${topic}".`
     : 'Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".';
 
+  const specialStructureInstructions = `
+Special structure guidance (apply when the selected tenses/structures include these):
+- MODAL VERBS (Should/Would/Can/Could/May/Might/Must/Have to/Need to/Used to): Use ONE blank. Options must be 4 different modals or modal phrases (e.g. "should", "must", "might", "could") — the correct one fits the context (advice, obligation, possibility, habit). Example: "You ___ see a doctor." → options: ["should", "would", "might", "used to"]
+- MODAL + PRESENT PERFECT: Use TWO blanks — modal + "have" + past participle (e.g. "should have gone"). Options: 4 different modals before "have ___". Example: "She ___ ___ earlier." → options: ["should have left", "must have left", "could have left", "would have left"]
+- PASSIVE VOICE (any tense): Use TWO blanks for auxiliary + past participle. Options: 4 different passive forms for the same verb. Example: "The letter ___ ___ yesterday." → options: ["was written", "is written", "has been written", "will be written"]
+- TYPE 0 CONDITIONAL: "If + present simple, present simple". Both clauses reflect universal truths or scientific facts. Use ONE blank in the result clause.
+- FUTURE IN THE PAST: Correct answer uses "would + infinitive". Distractors: other modals (will, could, should). Example: "She said she ___ help." → options: ["would", "will", "could", "should"]
+- HAD BETTER: Use ONE blank with options: "had better", "should", "must", "ought to". Example: "You ___ leave now." → correct: "had better"
+- STATIVE VERBS (know, love, understand, believe, want, need, seem, own, etc.): Test that stative verbs are NOT used in continuous form. Correct option: present simple. Distractors: present continuous, present perfect, past simple. Example: "She ___ the answer." → options: ["knows", "is knowing", "has known", "knew"] → correct: "knows"`;
+
   const model = genAI.getGenerativeModel({
     model: GEMINI_TEXT_MODEL,
-    systemInstruction: `You are an Expert English Grammar Teacher creating verb tense exercises for CEFR level ${level}.
+    systemInstruction: `You are an Expert English Grammar Teacher creating verb tense and grammar exercises for CEFR level ${level}.
 ${getAgeInstruction(ageSegment)}
 
 Generate exactly 15 sentence exercises and return a JSON object with this structure:
@@ -391,13 +401,14 @@ Generate exactly 15 sentence exercises and return a JSON object with this struct
 
 Rules:
 - chosen_topic: a short descriptive topic label (always include even when topic was given)
-- sentence_en: Use one blank ___ for single-word verb forms (went, has gone). For compound forms (e.g. have + past participle), use TWO blanks in correct positions: "I ___ never ___ such a bird before." (correct answer: "have seen")
-- sentence_ro: Complete Romanian translation of the sentence (with the correct verb, NOT a blank)
-- options: exactly 4 forms of the SAME verb in different tenses/aspects
+- sentence_en: Use one blank ___ for single-word answers. For multi-word answers (e.g. "was written", "should have left"), use TWO blanks in correct positions: "The book ___ ___ by Tolstoy." — the blanks match the words in the correct option when split by spaces.
+- sentence_ro: Complete Romanian translation of the sentence (with the correct verb form, NOT a blank)
+- options: exactly 4 verb forms or structures that could plausibly fill the blank(s); only one is correct for the context
 - correct_index: integer 0–3 indicating the correct option
 - ${tenseConstraint}
 - ${topicConstraint}
-- Level-appropriate vocabulary and sentence complexity for ${level}`,
+- Level-appropriate vocabulary and sentence complexity for ${level}
+${specialStructureInstructions}`,
     generationConfig: { responseMimeType: 'application/json', temperature: 0.85 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
