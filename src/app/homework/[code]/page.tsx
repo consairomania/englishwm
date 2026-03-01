@@ -394,20 +394,18 @@ export default function HomeworkExercisePage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitted, setSubmitted] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [showIncompleteModal, setShowIncompleteModal] = useState(false);
+  const [incompleteWarnings, setIncompleteWarnings] = useState<string[]>([]);
 
   // Time Travel answers: index per question (-1 = unanswered)
   const [ttAnswers, setTtAnswers] = useState<number[]>([]);
 
-  // Puzzle: selected words in order
-  const [puzzleSelected, setPuzzleSelected] = useState<string[]>([]);
-
-  // Dictation text + feedback
-  const [dictText, setDictText] = useState('');
-  const [dictFeedback, setDictFeedback] = useState<{ score: string; feedback_en: string; feedback_ro: string } | null>(null);
-
-  // Writing text + feedback
-  const [writingText, setWritingText] = useState('');
-  const [writingFeedback, setWritingFeedback] = useState<WritingFeedback | null>(null);
+  // Per-item state (key = index în ex.items[])
+  const [puzzleSelecteds, setPuzzleSelecteds] = useState<Record<number, string[]>>({});
+  const [dictTexts, setDictTexts] = useState<Record<number, string>>({});
+  const [dictFeedbacks, setDictFeedbacks] = useState<Record<number, { score: string; feedback_en: string; feedback_ro: string }>>({});
+  const [writingTexts, setWritingTexts] = useState<Record<number, string>>({});
+  const [writingFeedbacks, setWritingFeedbacks] = useState<Record<number, WritingFeedback>>({});
 
   // Results
   const [finalXp, setFinalXp] = useState(0);
@@ -446,6 +444,62 @@ export default function HomeworkExercisePage() {
     });
   }, [code]);
 
+  const handlePreSubmit = () => {
+    if (!hw) return;
+    const ex = hw.exercises;
+    const warnings: string[] = [];
+
+    if (Array.isArray(ex.items)) {
+      const items = ex.items as { type: string; data: unknown }[];
+      let ttOffset = 0;
+      let puzzleCount = 0;
+      let dictCount = 0;
+      let writingCount = 0;
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]!;
+        if (item.type === 'time_travel' && Array.isArray(item.data)) {
+          const len = (item.data as unknown[]).length;
+          const unanswered = ttAnswers.slice(ttOffset, ttOffset + len).filter((a) => a === -1).length;
+          if (unanswered > 0)
+            warnings.push(`Time Travel: ${unanswered} ${unanswered === 1 ? 'întrebare' : 'întrebări'} fără răspuns`);
+          ttOffset += len;
+        } else if (item.type === 'puzzle') {
+          puzzleCount++;
+          if ((puzzleSelecteds[i] ?? []).length === 0)
+            warnings.push(`Puzzle${puzzleCount > 1 ? ' #' + puzzleCount : ''}: nu ai selectat niciun cuvânt`);
+        } else if (item.type === 'dictation') {
+          dictCount++;
+          if (!(dictTexts[i] ?? '').trim())
+            warnings.push(`Dictare${dictCount > 1 ? ' #' + dictCount : ''}: nu ai scris nimic`);
+        } else if (item.type === 'writing') {
+          writingCount++;
+          if (!(writingTexts[i] ?? '').trim())
+            warnings.push(`Writing${writingCount > 1 ? ' #' + writingCount : ''}: nu ai scris nimic`);
+        }
+      }
+    } else {
+      const ttLen = Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as unknown[]).length : 0;
+      if (ttLen > 0) {
+        const unanswered = ttAnswers.filter((a) => a === -1).length;
+        if (unanswered > 0)
+          warnings.push(`Time Travel: ${unanswered} ${unanswered === 1 ? 'întrebare' : 'întrebări'} fără răspuns`);
+      }
+      if (ex.puzzle_data && (puzzleSelecteds[0] ?? []).length === 0)
+        warnings.push('Puzzle: nu ai selectat niciun cuvânt');
+      if (ex.dictation_data && !(dictTexts[0] ?? '').trim())
+        warnings.push('Dictare: nu ai scris nimic');
+      if (ex.writing_data && !(writingTexts[0] ?? '').trim())
+        warnings.push('Writing: nu ai scris nimic');
+    }
+
+    if (warnings.length > 0) {
+      setIncompleteWarnings(warnings);
+      setShowIncompleteModal(true);
+    } else {
+      handleSubmit();
+    }
+  };
+
   const handleSubmit = async () => {
     if (!hw || submitting) return;
     setSubmitting(true);
@@ -456,77 +510,127 @@ export default function HomeworkExercisePage() {
     let correct = 0;
     let total = 0;
 
-    // Extrage exerciții (suport format nou items[] și format vechi flat)
-    let allTtItems: TimeTravelItem[] = [];
-    let puzzleDataForSubmit: PuzzleData | null = null;
-    let dictDataForSubmit: DictationData | null = null;
-    let writingDataForSubmit: WritingData | null = null;
-
     if (Array.isArray(ex.items)) {
-      for (const item of ex.items as { type: string; data: unknown }[]) {
+      // ── Format nou: items[] ──────────────────────────────────────────────
+      const items = ex.items as { type: string; data: unknown }[];
+
+      // Colectăm toate TT-urile (concatenat) pentru scor global
+      const allTtItems: TimeTravelItem[] = [];
+      for (const item of items) {
         if (item.type === 'time_travel' && Array.isArray(item.data))
-          allTtItems = [...allTtItems, ...(item.data as TimeTravelItem[])];
-        else if (item.type === 'puzzle' && !puzzleDataForSubmit)
-          puzzleDataForSubmit = item.data as PuzzleData;
-        else if (item.type === 'dictation' && !dictDataForSubmit)
-          dictDataForSubmit = item.data as DictationData;
-        else if (item.type === 'writing' && !writingDataForSubmit)
-          writingDataForSubmit = item.data as WritingData;
+          allTtItems.push(...(item.data as TimeTravelItem[]));
       }
+
+      const puzzleAnswers: { answer: string; correct: boolean }[] = [];
+      const dictAnswers: unknown[] = [];
+      const writingAnswers: unknown[] = [];
+
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i]!;
+        if (item.type === 'puzzle') {
+          const pd = item.data as PuzzleData;
+          const reconstructed = (puzzleSelecteds[i] ?? []).join(' ');
+          const isCorrect = reconstructed.toLowerCase() === pd.sentence.toLowerCase();
+          total += 1;
+          if (isCorrect) { correct += 1; xp += 150; }
+          puzzleAnswers.push({ answer: reconstructed, correct: isCorrect });
+        } else if (item.type === 'dictation') {
+          const dd = item.data as DictationData;
+          const text = (dictTexts[i] ?? '').trim();
+          if (text) {
+            try {
+              const fb = await evaluateDictationAnswer(dd.sentence_en, text);
+              setDictFeedbacks((prev) => ({ ...prev, [i]: fb }));
+              total += 1;
+              if (fb.score === 'exact') { correct += 1; xp += 150; }
+              else if (fb.score === 'partial') { xp += 75; }
+              dictAnswers.push({ answer: text, feedback: fb });
+            } catch {
+              dictAnswers.push({ answer: text, feedback: null });
+            }
+          }
+        } else if (item.type === 'writing') {
+          const wd = item.data as WritingData;
+          const text = (writingTexts[i] ?? '').trim();
+          if (text) {
+            try {
+              const level = (ex.level as string) ?? 'B1';
+              const fb = await evaluateWriting(wd.prompt_en, text, level);
+              setWritingFeedbacks((prev) => ({ ...prev, [i]: fb }));
+              xp += Math.round((fb.score / 100) * 200);
+              writingAnswers.push({ answer: text, feedback: fb });
+            } catch {
+              writingAnswers.push({ answer: text, feedback: null });
+            }
+          }
+        }
+      }
+
+      if (allTtItems.length > 0) {
+        const ttCorrect = allTtItems.filter((item, i) => ttAnswers[i] === item.correct_index).length;
+        total += allTtItems.length;
+        correct += ttCorrect;
+        xp += ttCorrect * 50;
+        answers.time_travel_answers = ttAnswers;
+        answers.time_travel_score = `${ttCorrect}/${allTtItems.length}`;
+      }
+      if (puzzleAnswers.length > 0) answers.puzzle_answers = puzzleAnswers;
+      if (dictAnswers.length > 0) answers.dictation_answers = dictAnswers;
+      if (writingAnswers.length > 0) answers.writing_answers = writingAnswers;
+
     } else {
-      if (Array.isArray(ex.time_travel_data)) allTtItems = ex.time_travel_data as TimeTravelItem[];
-      if (ex.puzzle_data) puzzleDataForSubmit = ex.puzzle_data as PuzzleData;
-      if (ex.dictation_data) dictDataForSubmit = ex.dictation_data as DictationData;
-      if (ex.writing_data) writingDataForSubmit = ex.writing_data as WritingData;
-    }
+      // ── Format vechi plat (backward compat) ─────────────────────────────
+      const allTtItems: TimeTravelItem[] = Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as TimeTravelItem[]) : [];
+      const pd: PuzzleData | null = ex.puzzle_data ? (ex.puzzle_data as PuzzleData) : null;
+      const dd: DictationData | null = ex.dictation_data ? (ex.dictation_data as DictationData) : null;
+      const wd: WritingData | null = ex.writing_data ? (ex.writing_data as WritingData) : null;
 
-    // ── Time Travel ──────────────────────────────────────────────────────────
-    if (allTtItems.length > 0) {
-      const ttCorrect = allTtItems.filter((item, i) => ttAnswers[i] === item.correct_index).length;
-      total += allTtItems.length;
-      correct += ttCorrect;
-      xp += ttCorrect * 50;
-      answers.time_travel_answers = ttAnswers;
-      answers.time_travel_score = `${ttCorrect}/${allTtItems.length}`;
-    }
-
-    // ── Puzzle ───────────────────────────────────────────────────────────────
-    const puzzleData = puzzleDataForSubmit;
-    if (puzzleData) {
-      const reconstructed = puzzleSelected.join(' ');
-      const isCorrect = reconstructed.toLowerCase() === puzzleData.sentence.toLowerCase();
-      total += 1;
-      if (isCorrect) { correct += 1; xp += 150; }
-      answers.puzzle_answer = reconstructed;
-      answers.puzzle_correct = isCorrect;
-    }
-
-    // ── Dictation (AI eval) ──────────────────────────────────────────────────
-    if (dictDataForSubmit && dictText.trim()) {
-      try {
-        const fb = await evaluateDictationAnswer(dictDataForSubmit.sentence_en, dictText.trim());
-        setDictFeedback(fb);
-        answers.dictation_answer = dictText.trim();
-        answers.dictation_feedback = fb;
-        total += 1;
-        if (fb.score === 'exact') { correct += 1; xp += 150; }
-        else if (fb.score === 'partial') { xp += 75; }
-      } catch {
-        answers.dictation_answer = dictText.trim();
+      if (allTtItems.length > 0) {
+        const ttCorrect = allTtItems.filter((item, i) => ttAnswers[i] === item.correct_index).length;
+        total += allTtItems.length;
+        correct += ttCorrect;
+        xp += ttCorrect * 50;
+        answers.time_travel_answers = ttAnswers;
+        answers.time_travel_score = `${ttCorrect}/${allTtItems.length}`;
       }
-    }
-
-    // ── Writing (AI eval) ────────────────────────────────────────────────────
-    if (writingDataForSubmit && writingText.trim()) {
-      try {
-        const level = (ex.level as string) ?? 'B1';
-        const fb = await evaluateWriting(writingDataForSubmit.prompt_en, writingText.trim(), level);
-        setWritingFeedback(fb);
-        answers.writing_answer = writingText.trim();
-        answers.writing_feedback = fb;
-        xp += Math.round((fb.score / 100) * 200);
-      } catch {
-        answers.writing_answer = writingText.trim();
+      if (pd) {
+        const reconstructed = (puzzleSelecteds[0] ?? []).join(' ');
+        const isCorrect = reconstructed.toLowerCase() === pd.sentence.toLowerCase();
+        total += 1;
+        if (isCorrect) { correct += 1; xp += 150; }
+        answers.puzzle_answer = reconstructed;
+        answers.puzzle_correct = isCorrect;
+      }
+      if (dd) {
+        const text = (dictTexts[0] ?? '').trim();
+        if (text) {
+          try {
+            const fb = await evaluateDictationAnswer(dd.sentence_en, text);
+            setDictFeedbacks((prev) => ({ ...prev, 0: fb }));
+            answers.dictation_answer = text;
+            answers.dictation_feedback = fb;
+            total += 1;
+            if (fb.score === 'exact') { correct += 1; xp += 150; }
+            else if (fb.score === 'partial') { xp += 75; }
+          } catch {
+            answers.dictation_answer = text;
+          }
+        }
+      }
+      if (wd) {
+        const text = (writingTexts[0] ?? '').trim();
+        if (text) {
+          try {
+            const level = (ex.level as string) ?? 'B1';
+            const fb = await evaluateWriting(wd.prompt_en, text, level);
+            setWritingFeedbacks((prev) => ({ ...prev, 0: fb }));
+            answers.writing_answer = text;
+            answers.writing_feedback = fb;
+            xp += Math.round((fb.score / 100) * 200);
+          } catch {
+            answers.writing_answer = text;
+          }
+        }
       }
     }
 
@@ -581,32 +685,29 @@ export default function HomeworkExercisePage() {
   if (!hw) return null;
 
   const ex = hw.exercises;
-  // Suport format nou { items: [...] } și format vechi plat
-  let ttData: TimeTravelItem[] | null = null;
-  let puzzleData: PuzzleData | null = null;
-  let dictData: DictationData | null = null;
-  let writingData: WritingData | null = null;
-  if (Array.isArray(ex.items)) {
-    const allTt: TimeTravelItem[] = [];
+  const isNewFormat = Array.isArray(ex.items);
+
+  // Format vechi plat — backward compat
+  const ttDataFlat: TimeTravelItem[] | null = !isNewFormat && Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as TimeTravelItem[]) : null;
+  const puzzleDataFlat: PuzzleData | null = !isNewFormat && ex.puzzle_data ? (ex.puzzle_data as PuzzleData) : null;
+  const dictDataFlat: DictationData | null = !isNewFormat && ex.dictation_data ? (ex.dictation_data as DictationData) : null;
+  const writingDataFlat: WritingData | null = !isNewFormat && ex.writing_data ? (ex.writing_data as WritingData) : null;
+
+  const hasContent = isNewFormat
+    ? (ex.items as unknown[]).length > 0
+    : !!(ttDataFlat || puzzleDataFlat || dictDataFlat || writingDataFlat);
+
+  // Pre-calculăm offseturile TT per item (format nou)
+  const ttOffsets: number[] = [];
+  if (isNewFormat) {
+    let off = 0;
     for (const item of ex.items as { type: string; data: unknown }[]) {
+      ttOffsets.push(off);
       if (item.type === 'time_travel' && Array.isArray(item.data))
-        allTt.push(...(item.data as TimeTravelItem[]));
-      else if (item.type === 'puzzle' && !puzzleData)
-        puzzleData = item.data as PuzzleData;
-      else if (item.type === 'dictation' && !dictData)
-        dictData = item.data as DictationData;
-      else if (item.type === 'writing' && !writingData)
-        writingData = item.data as WritingData;
+        off += (item.data as unknown[]).length;
     }
-    if (allTt.length > 0) ttData = allTt;
-  } else {
-    ttData = Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as TimeTravelItem[]) : null;
-    puzzleData = ex.puzzle_data ? (ex.puzzle_data as PuzzleData) : null;
-    dictData = ex.dictation_data ? (ex.dictation_data as DictationData) : null;
-    writingData = ex.writing_data ? (ex.writing_data as WritingData) : null;
   }
 
-  const hasContent = ttData || puzzleData || dictData || writingData;
   const moduleIcons: Record<string, string> = {
     tense_arena: '⏰', puzzle: '🧩', dictation: '🎙️', writing: '✍️',
   };
@@ -644,11 +745,74 @@ export default function HomeworkExercisePage() {
             <p className="text-3xl">📭</p>
             <p className="text-sm font-bold text-slate-500">Niciun exercițiu în această temă.</p>
           </div>
+        ) : isNewFormat ? (
+          <>
+            {(ex.items as { type: string; data: unknown }[]).map((item, i) => {
+              if (item.type === 'time_travel' && Array.isArray(item.data)) {
+                const ttItems = item.data as TimeTravelItem[];
+                const offset = ttOffsets[i]!;
+                return (
+                  <TimeTravelSection
+                    key={i}
+                    items={ttItems}
+                    answers={ttAnswers.slice(offset, offset + ttItems.length)}
+                    onChange={(idx, optIdx) =>
+                      setTtAnswers((prev) => { const n = [...prev]; n[offset + idx] = optIdx; return n; })
+                    }
+                    submitted={false}
+                  />
+                );
+              }
+              if (item.type === 'puzzle') {
+                return (
+                  <PuzzleSection
+                    key={i}
+                    puzzle={item.data as PuzzleData}
+                    selected={puzzleSelecteds[i] ?? []}
+                    onToggle={(word, inSelected) =>
+                      setPuzzleSelecteds((prev) => ({
+                        ...prev,
+                        [i]: inSelected
+                          ? (prev[i] ?? []).filter((w) => w !== word)
+                          : [...(prev[i] ?? []), word],
+                      }))
+                    }
+                    submitted={false}
+                  />
+                );
+              }
+              if (item.type === 'dictation') {
+                return (
+                  <DictationSection
+                    key={i}
+                    dictation={item.data as DictationData}
+                    text={dictTexts[i] ?? ''}
+                    onChange={(v) => setDictTexts((prev) => ({ ...prev, [i]: v }))}
+                    feedback={dictFeedbacks[i] ?? null}
+                    submitted={false}
+                  />
+                );
+              }
+              if (item.type === 'writing') {
+                return (
+                  <WritingSection
+                    key={i}
+                    writing={item.data as WritingData}
+                    text={writingTexts[i] ?? ''}
+                    onChange={(v) => setWritingTexts((prev) => ({ ...prev, [i]: v }))}
+                    feedback={writingFeedbacks[i] ?? null}
+                    submitted={false}
+                  />
+                );
+              }
+              return null;
+            })}
+          </>
         ) : (
           <>
-            {ttData && ttData.length > 0 && (
+            {ttDataFlat && ttDataFlat.length > 0 && (
               <TimeTravelSection
-                items={ttData}
+                items={ttDataFlat}
                 answers={ttAnswers}
                 onChange={(idx, optIdx) =>
                   setTtAnswers((prev) => { const n = [...prev]; n[idx] = optIdx; return n; })
@@ -656,35 +820,34 @@ export default function HomeworkExercisePage() {
                 submitted={false}
               />
             )}
-            {puzzleData && (
+            {puzzleDataFlat && (
               <PuzzleSection
-                puzzle={puzzleData}
-                selected={puzzleSelected}
-                onToggle={(word, inSelected) => {
-                  if (inSelected) {
-                    setPuzzleSelected((prev) => prev.filter((w) => w !== word));
-                  } else {
-                    setPuzzleSelected((prev) => [...prev, word]);
-                  }
-                }}
+                puzzle={puzzleDataFlat}
+                selected={puzzleSelecteds[0] ?? []}
+                onToggle={(word, inSelected) =>
+                  setPuzzleSelecteds((prev) => ({
+                    ...prev,
+                    0: inSelected ? (prev[0] ?? []).filter((w) => w !== word) : [...(prev[0] ?? []), word],
+                  }))
+                }
                 submitted={false}
               />
             )}
-            {dictData && (
+            {dictDataFlat && (
               <DictationSection
-                dictation={dictData}
-                text={dictText}
-                onChange={setDictText}
-                feedback={dictFeedback}
+                dictation={dictDataFlat}
+                text={dictTexts[0] ?? ''}
+                onChange={(v) => setDictTexts((prev) => ({ ...prev, 0: v }))}
+                feedback={dictFeedbacks[0] ?? null}
                 submitted={false}
               />
             )}
-            {writingData && (
+            {writingDataFlat && (
               <WritingSection
-                writing={writingData}
-                text={writingText}
-                onChange={setWritingText}
-                feedback={writingFeedback}
+                writing={writingDataFlat}
+                text={writingTexts[0] ?? ''}
+                onChange={(v) => setWritingTexts((prev) => ({ ...prev, 0: v }))}
+                feedback={writingFeedbacks[0] ?? null}
                 submitted={false}
               />
             )}
@@ -697,7 +860,7 @@ export default function HomeworkExercisePage() {
         <div className="fixed bottom-0 left-0 right-0 bg-white/95 backdrop-blur-xl border-t border-slate-100 px-4 py-4">
           <div className="max-w-lg mx-auto">
             <button
-              onClick={handleSubmit}
+              onClick={handlePreSubmit}
               disabled={submitting}
               className="w-full flex items-center justify-center gap-2 py-4 bg-violet-600 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-violet-700 transition-all disabled:opacity-60 shadow-lg"
             >
@@ -707,6 +870,41 @@ export default function HomeworkExercisePage() {
                 <><Send size={16} /> Trimite temele</>
               )}
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal temă incompletă */}
+      {showIncompleteModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-[28px] p-6 max-w-sm w-full shadow-2xl space-y-4">
+            <div className="text-center space-y-1">
+              <div className="text-4xl">⚠️</div>
+              <h3 className="text-lg font-black text-slate-800 uppercase italic tracking-tighter">Temă incompletă</h3>
+              <p className="text-xs text-slate-500">Nu ai completat toate exercițiile:</p>
+            </div>
+            <div className="space-y-2">
+              {incompleteWarnings.map((w, i) => (
+                <div key={i} className="flex items-center gap-2 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2.5">
+                  <span className="text-amber-500 shrink-0">⚠</span>
+                  <p className="text-sm font-bold text-amber-800">{w}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <button
+                onClick={() => setShowIncompleteModal(false)}
+                className="flex-1 py-3 bg-slate-100 text-slate-700 rounded-xl font-black text-sm uppercase tracking-widest hover:bg-slate-200 transition-all"
+              >
+                ← Înapoi
+              </button>
+              <button
+                onClick={() => { setShowIncompleteModal(false); handleSubmit(); }}
+                className="flex-1 py-3 bg-amber-500 text-white rounded-xl font-black text-sm uppercase tracking-widest hover:bg-amber-600 transition-all"
+              >
+                Trimite oricum
+              </button>
+            </div>
           </div>
         </div>
       )}

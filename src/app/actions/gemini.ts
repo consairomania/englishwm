@@ -4,6 +4,7 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { supabase } from '@/lib/supabase/client';
 import type { PuzzleData, VoyagerData, QuestData, TimeTravelData, VocabWord, WritingData, WritingFeedback } from '@/types/database';
 import { PuzzleSchema, VoyagerSchema, QuestSchema, TimeTravelSchema, DictationSchema, DictationEvalSchema, WritingPromptSchema, WritingFeedbackSchema } from '@/lib/geminiSchemas';
+import { filterUncommonWords } from '@/lib/commonWords';
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
@@ -481,15 +482,40 @@ export async function addVocabularyToStudent(
 
   const existing: VocabWord[] = Array.isArray(data?.vocabulary) ? (data.vocabulary as VocabWord[]) : [];
   const existingEn = new Set(existing.map(w => w.en.toLowerCase()));
-  const newWords = words.filter(w => !existingEn.has(w.en.toLowerCase()));
+  const newWords = filterUncommonWords(words).filter(w => !existingEn.has(w.en.toLowerCase()));
 
   if (newWords.length === 0) return {};
 
-  const merged = [...newWords, ...existing]; // newest first
+  const merged = [...newWords, ...existing].slice(0, 20); // newest first, max 20
 
   const { error: updateErr } = await supabase
     .from('students')
     .update({ vocabulary: merged })
+    .eq('id', studentId);
+
+  if (updateErr) return { error: updateErr.message };
+  return {};
+}
+
+// ─── Delete Vocabulary Word ───────────────────────────────────────────────────
+export async function deleteVocabularyWord(
+  studentId: string,
+  wordEn: string
+): Promise<{ error?: string }> {
+  const { data, error: fetchErr } = await supabase
+    .from('students')
+    .select('vocabulary')
+    .eq('id', studentId)
+    .maybeSingle();
+
+  if (fetchErr) return { error: fetchErr.message };
+
+  const existing: VocabWord[] = Array.isArray(data?.vocabulary) ? (data.vocabulary as VocabWord[]) : [];
+  const updated = existing.filter(w => w.en.toLowerCase() !== wordEn.toLowerCase());
+
+  const { error: updateErr } = await supabase
+    .from('students')
+    .update({ vocabulary: updated })
     .eq('id', studentId);
 
   if (updateErr) return { error: updateErr.message };

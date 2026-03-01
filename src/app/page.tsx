@@ -57,6 +57,7 @@ import {
 import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/roomCode';
 import { playSuccessSound, playWrongSound, setSoundMuted } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
+import { filterUncommonWords } from '@/lib/commonWords';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TimeTravelView, StudentTimeTravelAnswers } from '@/components/features/TimeTravel';
 import {
@@ -85,6 +86,7 @@ import {
   generateWritingPrompt,
   clearWritingContent,
   evaluateWriting,
+  deleteVocabularyWord,
 } from '@/app/actions/gemini';
 import { verifyTeacherCredentials } from '@/app/actions/auth';
 import { saveSessionLog, getSessionLogs, getAllRecentSessionLogs } from '@/app/actions/sessionActions';
@@ -465,11 +467,11 @@ function TeacherHome({
     <div className="min-h-screen bg-[#F8FAFC] p-4 pb-12">
       <div className="max-w-lg mx-auto space-y-5">
         <div className="pt-6 text-center space-y-1">
-          <div className="w-14 h-14 bg-pink-100 rounded-2xl flex items-center justify-center mx-auto">
-            <User className="text-pink-600" size={26} />
+          <div className="w-16 h-16 rounded-full overflow-hidden mx-auto shadow-md border-2 border-pink-200">
+            <img src={teacherPhoto} alt="Medéa" className="w-full h-full object-cover" />
           </div>
           <h2 className="text-2xl font-black italic uppercase tracking-tighter text-slate-800">
-            Portofoliu Elevi
+            Teacher Home
           </h2>
           <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
             English with Medéa
@@ -1371,6 +1373,7 @@ function DashboardView({
   onAdjustSkill,
   onGoToPortfolio,
   onGoToHomework,
+  onDeleteVocabWord,
 }: {
   student: Student;
   vocabularyLoot: string[];
@@ -1382,6 +1385,7 @@ function DashboardView({
   onAdjustSkill?: (skill: keyof Student['skills'], delta: number) => void;
   onGoToPortfolio?: () => void;
   onGoToHomework?: () => void;
+  onDeleteVocabWord?: (en: string) => void;
 }) {
   const xpPercent = Math.min((student.xp / student.nextLevelXp) * 100, 100);
   const activities = [
@@ -1521,23 +1525,27 @@ function DashboardView({
           </div>
         ))}
       </div>
-      {!isTeacher && student.vocabulary && student.vocabulary.length > 0 && (
+      {student.vocabulary && filterUncommonWords(student.vocabulary).length > 0 && (
         <div className="bg-white rounded-[30px] p-5 shadow-lg border border-slate-50">
           <h3 className="text-[10px] font-black text-slate-400 mb-3 uppercase tracking-[0.2em] flex items-center gap-2">
-            <BookOpen className="text-violet-500" size={14} /> Cuvintele mele ({student.vocabulary.length})
+            <BookOpen className="text-violet-500" size={14} /> {isTeacher ? 'Cuvintele elevului' : 'Cuvintele mele'} ({filterUncommonWords(student.vocabulary).length})
           </h3>
           <div className="flex flex-wrap gap-2">
-            {student.vocabulary.slice(0, 20).map((w, i) => (
-              <div key={i} className="flex flex-col bg-violet-50 border border-violet-100 px-3 py-1.5 rounded-xl">
+            {filterUncommonWords(student.vocabulary).slice(0, 20).map((w, i) => (
+              <div key={i} className="relative group flex flex-col bg-violet-50 border border-violet-100 px-3 py-1.5 rounded-xl">
                 <span className="font-black text-violet-800 text-[11px]">{w.en}</span>
                 <span className="text-violet-400 italic text-[10px]">{w.ro}</span>
+                {onDeleteVocabWord && (
+                  <button
+                    onClick={() => onDeleteVocabWord(w.en)}
+                    className="absolute -top-1.5 -right-1.5 w-4 h-4 bg-slate-200 hover:bg-red-100 text-slate-400 hover:text-red-500 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all"
+                    title="Șterge cuvântul"
+                  >
+                    <X size={9} />
+                  </button>
+                )}
               </div>
             ))}
-            {student.vocabulary.length > 20 && (
-              <div className="flex items-center px-3 py-1.5 text-slate-400 text-[10px] font-bold">
-                +{student.vocabulary.length - 20} mai multe
-              </div>
-            )}
           </div>
         </div>
       )}
@@ -4402,6 +4410,15 @@ export default function DashboardPage() {
     }
   }, [isTeacher, sessionId]);
 
+  const handleDeleteVocabWord = useCallback(async (wordEn: string) => {
+    if (!student?.dbId) return;
+    setStudent((prev) => {
+      if (!prev) return prev;
+      return { ...prev, vocabulary: prev.vocabulary.filter(w => w.en.toLowerCase() !== wordEn.toLowerCase()) };
+    });
+    await deleteVocabularyWord(student.dbId, wordEn);
+  }, [student?.dbId]);
+
   const addVocab = useCallback(async (word: string) => {
     if (vocabularyLoot.includes(word)) return;
     const newLoot = [...vocabularyLoot, word];
@@ -4824,6 +4841,7 @@ export default function DashboardPage() {
             onAdjustSkill={isTeacher ? adjustSkill : undefined}
             onGoToPortfolio={isTeacher ? () => { setPortfolioReturnScreen(screen); setScreen('teacher-home'); } : undefined}
             onGoToHomework={isTeacher ? () => changeView('homework_portfolio') : undefined}
+            onDeleteVocabWord={student.dbId ? handleDeleteVocabWord : undefined}
           />
         )}
         {currentView === 'homework_portfolio' && (
@@ -4939,12 +4957,11 @@ export default function DashboardPage() {
             onChangeView={changeView}
             isSaving={isSaving}
             roomCode={roomCode}
-            onAddToDraft={(['puzzle', 'tense_arena', 'dictation', 'writing'] as SessionState['current_view'][]).includes(currentView) ? handleAddToDraft : undefined}
+            onAddToDraft={(['puzzle', 'tense_arena', 'writing'] as SessionState['current_view'][]).includes(currentView) ? handleAddToDraft : undefined}
             draftCount={activeDraft?.items?.length ?? 0}
             hasExerciseData={
               (currentView === 'puzzle' && !!effectiveState?.exercise_data?.puzzle_data) ||
               (currentView === 'tense_arena' && !!effectiveState?.exercise_data?.time_travel_data) ||
-              (currentView === 'dictation' && !!effectiveState?.exercise_data?.dictation_data) ||
               (currentView === 'writing' && !!effectiveState?.exercise_data?.writing_data)
             }
           />

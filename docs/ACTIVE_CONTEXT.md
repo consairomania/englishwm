@@ -95,6 +95,15 @@ src/lib/roomCode.ts                       Cod de 4 cifre ↔ UUID sesiune
 | Quest        | arena        | quest_data, student_quest_boosters                | 50–150/booster (profesor)   |
 | Time Travel  | tense_arena  | time_travel_data, student_time_travel_answers     | 50/răspuns corect (auto)    |
 
+📝 Vocabular (Cuvintele mele)
+- `VocabWord[]` stocat în coloana `vocabulary` JSONB pe tabelul `students`
+- Max 20 cuvinte (FIFO — cel mai vechi dispare când apare unul nou); enforced în `addVocabularyToStudent`
+- `deleteVocabularyWord(studentId, wordEn)` — server action în gemini.ts care șterge un cuvânt din DB
+- `handleDeleteVocabWord` în DashboardPage: update optimistic local + apel server action
+- Secțiunea "Cuvintele mele" vizibilă atât pentru elev cât și pentru profesor în DashboardView
+- Buton X per cuvânt (apare la hover) — disponibil dacă `onDeleteVocabWord` prop este pasat
+- Teacher Home: titlu = "Teacher Home", avatar = poza profesorului (teacherPhoto URL)
+
 📊 Categorii Time Travel (36 tense-uri/structuri în 7 categorii)
 - Present Tenses (4): Present Simple, Continuous, Perfect, Perfect Continuous
 - Past Tenses (4): Past Simple, Continuous, Perfect, Perfect Continuous
