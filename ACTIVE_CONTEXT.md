@@ -40,6 +40,19 @@ Data: 2026-03-01
 ### Limitare actuală
 - Quest (`quest_data`) și Voyager nu sunt incluse în teme (structura lor e diferită)
 
+### State DashboardPage (homework-related) — actualizat
+- `reviewPage` — pagina curentă în HomeworkReviewOverlay (teacher-controlled)
+- `handleReviewNavigate(p)` — profesor navighează la pagina p → scrie în session_state → elev urmărește
+- `homework_review_data.page` — câmp adăugat în session_state pentru sincronizare pagină review
+
+### Pagina /homework/[code] — suport format nou
+- Format nou `{ items: DraftHomeworkItem[] }`: detectat cu `Array.isArray(ex.items)`
+- Format vechi flat (`puzzle_data`, `time_travel_data` etc.): backward compat
+- Ambele formate suportate în useEffect init, handleSubmit, și render
+
 ## Bug-uri rezolvate
 - Butonul TEMĂ nu funcționa: `localSession.exercise_data` era mereu gol; fix: `(liveState ?? localSession)?.exercise_data`
 - Homework section eliminată din DashboardView (acum dedicată în HomeworkPortfolioView)
+- Elev nu vedea exercițiile la coduri noi: render section folosea format vechi; fix: extracție duală
+- Elev nu urmărea profesorul la pagina Teme: `isTeacher &&` eliminat din fetchStudentHomework useEffect
+- Navigare review: Anterior/Următor dezactivate pentru elev; profesor sincronizează pagina via session_state

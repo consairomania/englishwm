@@ -424,10 +424,22 @@ export default function HomeworkExercisePage() {
           setSubmitted(true);
           setFinalXp(data.xp_earned);
         }
-        // Init Time Travel answers
-        const ttData = data.exercises.time_travel_data;
-        if (Array.isArray(ttData)) {
-          setTtAnswers(new Array(ttData.length).fill(-1));
+        // Init Time Travel answers (support both old flat format and new items format)
+        const exItems = data.exercises.items;
+        if (Array.isArray(exItems)) {
+          // New format: { items: DraftHomeworkItem[] }
+          let ttLen = 0;
+          for (const item of exItems as { type: string; data: unknown }[]) {
+            if (item.type === 'time_travel' && Array.isArray(item.data)) {
+              ttLen += (item.data as unknown[]).length;
+            }
+          }
+          if (ttLen > 0) setTtAnswers(new Array(ttLen).fill(-1));
+        } else {
+          const ttData = data.exercises.time_travel_data;
+          if (Array.isArray(ttData)) {
+            setTtAnswers(new Array((ttData as unknown[]).length).fill(-1));
+          }
         }
       }
       setLoading(false);
@@ -444,20 +456,42 @@ export default function HomeworkExercisePage() {
     let correct = 0;
     let total = 0;
 
+    // Extrage exerciții (suport format nou items[] și format vechi flat)
+    let allTtItems: TimeTravelItem[] = [];
+    let puzzleDataForSubmit: PuzzleData | null = null;
+    let dictDataForSubmit: DictationData | null = null;
+    let writingDataForSubmit: WritingData | null = null;
+
+    if (Array.isArray(ex.items)) {
+      for (const item of ex.items as { type: string; data: unknown }[]) {
+        if (item.type === 'time_travel' && Array.isArray(item.data))
+          allTtItems = [...allTtItems, ...(item.data as TimeTravelItem[])];
+        else if (item.type === 'puzzle' && !puzzleDataForSubmit)
+          puzzleDataForSubmit = item.data as PuzzleData;
+        else if (item.type === 'dictation' && !dictDataForSubmit)
+          dictDataForSubmit = item.data as DictationData;
+        else if (item.type === 'writing' && !writingDataForSubmit)
+          writingDataForSubmit = item.data as WritingData;
+      }
+    } else {
+      if (Array.isArray(ex.time_travel_data)) allTtItems = ex.time_travel_data as TimeTravelItem[];
+      if (ex.puzzle_data) puzzleDataForSubmit = ex.puzzle_data as PuzzleData;
+      if (ex.dictation_data) dictDataForSubmit = ex.dictation_data as DictationData;
+      if (ex.writing_data) writingDataForSubmit = ex.writing_data as WritingData;
+    }
+
     // ── Time Travel ──────────────────────────────────────────────────────────
-    const ttData = ex.time_travel_data;
-    if (Array.isArray(ttData) && ttData.length > 0) {
-      const items = ttData as TimeTravelItem[];
-      const ttCorrect = items.filter((item, i) => ttAnswers[i] === item.correct_index).length;
-      total += items.length;
+    if (allTtItems.length > 0) {
+      const ttCorrect = allTtItems.filter((item, i) => ttAnswers[i] === item.correct_index).length;
+      total += allTtItems.length;
       correct += ttCorrect;
       xp += ttCorrect * 50;
       answers.time_travel_answers = ttAnswers;
-      answers.time_travel_score = `${ttCorrect}/${items.length}`;
+      answers.time_travel_score = `${ttCorrect}/${allTtItems.length}`;
     }
 
     // ── Puzzle ───────────────────────────────────────────────────────────────
-    const puzzleData = ex.puzzle_data as PuzzleData | undefined;
+    const puzzleData = puzzleDataForSubmit;
     if (puzzleData) {
       const reconstructed = puzzleSelected.join(' ');
       const isCorrect = reconstructed.toLowerCase() === puzzleData.sentence.toLowerCase();
@@ -468,10 +502,9 @@ export default function HomeworkExercisePage() {
     }
 
     // ── Dictation (AI eval) ──────────────────────────────────────────────────
-    const dictData = ex.dictation_data as DictationData | undefined;
-    if (dictData && dictText.trim()) {
+    if (dictDataForSubmit && dictText.trim()) {
       try {
-        const fb = await evaluateDictationAnswer(dictData.sentence_en, dictText.trim());
+        const fb = await evaluateDictationAnswer(dictDataForSubmit.sentence_en, dictText.trim());
         setDictFeedback(fb);
         answers.dictation_answer = dictText.trim();
         answers.dictation_feedback = fb;
@@ -484,11 +517,10 @@ export default function HomeworkExercisePage() {
     }
 
     // ── Writing (AI eval) ────────────────────────────────────────────────────
-    const writingData = ex.writing_data as WritingData | undefined;
-    if (writingData && writingText.trim()) {
+    if (writingDataForSubmit && writingText.trim()) {
       try {
         const level = (ex.level as string) ?? 'B1';
-        const fb = await evaluateWriting(writingData.prompt_en, writingText.trim(), level);
+        const fb = await evaluateWriting(writingDataForSubmit.prompt_en, writingText.trim(), level);
         setWritingFeedback(fb);
         answers.writing_answer = writingText.trim();
         answers.writing_feedback = fb;
@@ -549,10 +581,30 @@ export default function HomeworkExercisePage() {
   if (!hw) return null;
 
   const ex = hw.exercises;
-  const ttData = Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as TimeTravelItem[]) : null;
-  const puzzleData = ex.puzzle_data ? (ex.puzzle_data as PuzzleData) : null;
-  const dictData = ex.dictation_data ? (ex.dictation_data as DictationData) : null;
-  const writingData = ex.writing_data ? (ex.writing_data as WritingData) : null;
+  // Suport format nou { items: [...] } și format vechi plat
+  let ttData: TimeTravelItem[] | null = null;
+  let puzzleData: PuzzleData | null = null;
+  let dictData: DictationData | null = null;
+  let writingData: WritingData | null = null;
+  if (Array.isArray(ex.items)) {
+    const allTt: TimeTravelItem[] = [];
+    for (const item of ex.items as { type: string; data: unknown }[]) {
+      if (item.type === 'time_travel' && Array.isArray(item.data))
+        allTt.push(...(item.data as TimeTravelItem[]));
+      else if (item.type === 'puzzle' && !puzzleData)
+        puzzleData = item.data as PuzzleData;
+      else if (item.type === 'dictation' && !dictData)
+        dictData = item.data as DictationData;
+      else if (item.type === 'writing' && !writingData)
+        writingData = item.data as WritingData;
+    }
+    if (allTt.length > 0) ttData = allTt;
+  } else {
+    ttData = Array.isArray(ex.time_travel_data) ? (ex.time_travel_data as TimeTravelItem[]) : null;
+    puzzleData = ex.puzzle_data ? (ex.puzzle_data as PuzzleData) : null;
+    dictData = ex.dictation_data ? (ex.dictation_data as DictationData) : null;
+    writingData = ex.writing_data ? (ex.writing_data as WritingData) : null;
+  }
 
   const hasContent = ttData || puzzleData || dictData || writingData;
   const moduleIcons: Record<string, string> = {
