@@ -1,12 +1,13 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown, Zap } from 'lucide-react';
+import { Clock, Loader2, CheckCircle2, XCircle, Sparkles, RefreshCw, User, Shuffle, ChevronDown } from 'lucide-react';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import { generateTimeTravelContent, clearTimeTravelContent, regenerateTimeTravelItem } from '@/app/actions/gemini';
 import { playWrongSound } from '@/lib/sound';
 import { supabase } from '@/lib/supabase/client';
 import type { TimeTravelData } from '@/types/database';
+import { AGE_TOPICS } from '@/lib/ageTopics';
 
 type TenseCategory = { label: string; tenses: string[] };
 
@@ -185,6 +186,8 @@ export function TimeTravelView({
   const [genError, setGenError] = useState('');
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [regeneratingIdx, setRegeneratingIdx] = useState<number | null>(null);
+  const [lastChosenTopic, setLastChosenTopic] = useState<string>('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
 
   // Ref pentru click-outside pe dropdown
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -284,22 +287,31 @@ export function TimeTravelView({
   };
 
   // ── Generare (profesor) ───────────────────────────────────────────────────────
-  const handleGenerate = async (overrideTenses?: string[]) => {
+  // overrideTopic: undefined = folosește topic din state; null = forțat random (fără temă)
+  const handleGenerate = async (overrideTenses?: string[], overrideTopic?: string | null) => {
     if (isGenerating || isCoolingDown) return;
-    const wasRandom = !topic.trim();
+    const effectiveTopic = overrideTopic === null ? '' : (overrideTopic !== undefined ? overrideTopic : topic);
     setIsGenerating(true);
     setGenError('');
     try {
       const tensesToPass = overrideTenses ?? (selectedTenses.length > 0 ? selectedTenses : undefined);
+      const isRandomGen = !effectiveTopic.trim();
       const { chosenTopic } = await generateTimeTravelContent(
         sessionId,
         studentLevel,
-        topic.trim() || undefined,
+        effectiveTopic.trim() || undefined,
         tensesToPass,
         ageSegment,
-        exerciseCount
+        exerciseCount,
+        isRandomGen && usedTopics.length > 0 ? usedTopics : undefined
       );
-      if (wasRandom) setTopic(chosenTopic);
+      setLastChosenTopic(chosenTopic);
+      if (isRandomGen) {
+        setUsedTopics(prev => {
+          const next = [...prev, chosenTopic];
+          return next.length >= AGE_TOPICS[ageSegment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     } finally {
@@ -319,7 +331,9 @@ export function TimeTravelView({
     const picked = shuffled.slice(0, 5);
     setSelectedTenses(picked);
     setTopic('');
-    handleGenerate(picked);
+    // Trimitem null ca overrideTopic pentru a evita bug-ul async:
+    // setTopic('') nu actualizează state-ul înainte ca handleGenerate să citească topic-ul
+    handleGenerate(picked, null);
   };
 
   const handleClear = async () => {
@@ -422,7 +436,7 @@ export function TimeTravelView({
               className="flex-1 px-4 py-3 rounded-xl bg-slate-50 border border-slate-100 outline-none focus:border-indigo-400 transition-all font-bold text-slate-700 text-sm placeholder:font-medium placeholder:text-slate-300"
               placeholder="Subiect / scenariu... (lasă gol pentru random)"
               value={topic}
-              onChange={(e) => { setTopic(e.target.value); setGenError(''); }}
+              onChange={(e) => { setTopic(e.target.value); setGenError(''); setLastChosenTopic(''); }}
               onKeyDown={(e) => e.key === 'Enter' && handleGenerate()}
               disabled={isGenerating}
             />
@@ -552,6 +566,12 @@ export function TimeTravelView({
               {isGenerating ? 'Generez...' : isCoolingDown ? 'Cooldown...' : isRandom ? 'Random' : timeTravelData ? 'Re-generează' : 'Generează'}
             </button>
           </div>
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-indigo-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-indigo-500">{lastChosenTopic}</span></span>
+            </div>
+          )}
           {genError && (
             <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl px-4 py-2.5">
               <XCircle size={13} className="shrink-0" />

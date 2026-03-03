@@ -1,0 +1,31 @@
+export const AGE_TOPICS: Record<'child' | 'teenager' | 'adult', string[]> = {
+  child: [
+    'Animals & Wildlife', 'Dinosaurs & Prehistoric Life', 'Superheroes & Powers',
+    'Fairy Tales & Magic', 'School Adventures', 'Sports & Games', 'Nature & Plants',
+    'Space & Planets', 'Cooking & Food', 'The Seasons & Weather', 'Pets & Animal Care',
+    'Friendship & Kindness', 'Family Life', 'The Ocean & Sea Creatures', 'Bugs & Insects',
+    'Holidays & Celebrations', 'The Jungle & Safari', 'A Day at the Zoo',
+    'Circus & Performers', 'Toys & Inventions',
+  ],
+  teenager: [
+    'Social Media & Online Life', 'Music & Concerts', 'Sports & Competitions',
+    'Gaming & Esports', 'Fashion & Personal Style', 'School & Exams', 'Travel & Adventure',
+    'Environmental Issues', 'Technology & Apps', 'Movies & TV Series',
+    'Volunteering & Community', 'Part-time Jobs', 'Learning New Skills',
+    'Street Food & Restaurants', 'Friendships & Social Life', 'Mental Health & Wellbeing',
+    'Future Careers', 'Hobbies & Passions', 'Science Discoveries', 'Cultural Exchange',
+  ],
+  adult: [
+    'Work-Life Balance', 'Artificial Intelligence at Work', 'Remote vs. Office Work',
+    'Leadership and Management', 'Entrepreneurship', 'Stress Management', 'Healthy Habits',
+    'Emotional Intelligence', 'Lifelong Learning', 'Minimalism as a Lifestyle',
+    'Sustainable Tourism', 'The Impact of Social Media', 'Financial Literacy',
+    'Cultural Differences', 'The Future of Cities', 'Gastronomy as a Cultural Experience',
+    'The Evolution of Cinema', 'Hobbies in Adulthood', 'The Power of Volunteering',
+    'Climate Change', 'Friendship in Adulthood', 'Quality vs. Quantity',
+    'Childhood Friendships', 'The Influence of Social Circle', 'Dating in the Digital Age',
+    'Dynamics of the Modern Family', 'Long-Distance Relationships', 'Balance in a Relationship',
+    'The Art of Active Listening', 'Managing Conflicts', 'Body Language', 'Setting Boundaries',
+    'Authentic Networking', 'Mentoring', 'Social Intelligence at Work',
+  ],
+};

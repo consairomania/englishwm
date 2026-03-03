@@ -5,18 +5,25 @@ import { supabase } from '@/lib/supabase/client';
 import type { PuzzleData, VoyagerData, QuestData, TimeTravelData, VocabWord, WritingData, WritingFeedback } from '@/types/database';
 import { PuzzleSchema, VoyagerSchema, QuestSchema, TimeTravelSchema, DictationSchema, DictationEvalSchema, WritingPromptSchema, WritingFeedbackSchema } from '@/lib/geminiSchemas';
 import { filterUncommonWords } from '@/lib/commonWords';
+import { AGE_TOPICS } from '@/lib/ageTopics';
 
 const GEMINI_TEXT_MODEL = 'gemini-2.5-flash';
 
 function getAgeInstruction(ageSegment: 'child' | 'teenager' | 'adult'): string {
+  const topics = AGE_TOPICS[ageSegment].join(', ');
   switch (ageSegment) {
     case 'child':
-      return 'The student is a child (6-11 years old). Use simple vocabulary and short sentences. When choosing a random topic, pick ONE from this curated list: Animals & Wildlife, Dinosaurs & Prehistoric Life, Superheroes & Powers, Fairy Tales & Magic, School Adventures, Sports & Games, Nature & Plants, Space & Planets, Cooking & Food, The Seasons & Weather, Pets & Animal Care, Friendship & Kindness, Family Life, The Ocean & Sea Creatures, Bugs & Insects, Holidays & Celebrations, The Jungle & Safari, A Day at the Zoo, Circus & Performers, Toys & Inventions. Avoid adult themes, violence, or romance.';
+      return `The student is a child (6-11 years old). Use simple vocabulary and short sentences. When choosing a random topic, pick ONE from this curated list: ${topics}. Avoid adult themes, violence, or romance.`;
     case 'teenager':
-      return 'The student is a teenager (12-17 years old). Use engaging, modern language. When choosing a random topic, pick ONE from this curated list: Social Media & Online Life, Music & Concerts, Sports & Competitions, Gaming & Esports, Fashion & Personal Style, School & Exams, Travel & Adventure, Environmental Issues, Technology & Apps, Movies & TV Series, Volunteering & Community, Part-time Jobs, Learning New Skills, Street Food & Restaurants, Friendships & Social Life, Mental Health & Wellbeing, Future Careers, Hobbies & Passions, Science Discoveries, Cultural Exchange. Keep content age-appropriate.';
+      return `The student is a teenager (12-17 years old). Use engaging, modern language. When choosing a random topic, pick ONE from this curated list: ${topics}. Keep content age-appropriate.`;
     case 'adult':
-      return 'The student is an adult (18+ years old). Use sophisticated, mature vocabulary. When choosing a random topic, pick ONE from this curated list: Work-Life Balance, Artificial Intelligence at Work, Remote vs. Office Work, Leadership and Management, Entrepreneurship, Stress Management, Healthy Habits, Emotional Intelligence, Lifelong Learning, Minimalism as a Lifestyle, Sustainable Tourism, The Impact of Social Media, Financial Literacy, Cultural Differences, The Future of Cities, Gastronomy as a Cultural Experience, The Evolution of Cinema, Hobbies in Adulthood, The Power of Volunteering, Climate Change, Friendship in Adulthood, Quality vs. Quantity, Childhood Friendships, The Influence of Social Circle, Dating in the Digital Age, Dynamics of the Modern Family, Long-Distance Relationships, Balance in a Relationship, The Art of Active Listening, Managing Conflicts, Body Language, Setting Boundaries, Authentic Networking, Mentoring, Social Intelligence at Work.';
+      return `The student is an adult (18+ years old). Use sophisticated, mature vocabulary. When choosing a random topic, pick ONE from this curated list: ${topics}.`;
   }
+}
+
+function buildAvoidClause(avoidTopics?: string[]): string {
+  if (!avoidTopics || avoidTopics.length === 0) return '';
+  return ` IMPORTANT: Do NOT choose any of these recently used topics: ${avoidTopics.map(t => `"${t}"`).join(', ')} — pick a completely different topic from the list.`;
 }
 
 function getGenAI() {
@@ -51,7 +58,8 @@ export async function generatePuzzleContent(
   sessionId: string,
   topic: string,
   level: string,
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  avoidTopics?: string[]
 ): Promise<{ data: PuzzleData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -62,7 +70,7 @@ The student's level is ${level} (CEFR: A1–C2). Adjust complexity accordingly.
 ${getAgeInstruction(ageSegment)}
 
 ${isRandom
-  ? 'Pick ONE topic from the curated age-appropriate list above. Be creative in how you build the sentence from it.'
+  ? `Pick ONE topic from the curated age-appropriate list above. Be creative in how you build the sentence from it.${buildAvoidClause(avoidTopics)}`
   : `TASK: Create ONE coherent English sentence about: "${topic}".`
 }
 
@@ -153,7 +161,8 @@ export async function generateVoyagerContent(
   sessionId: string,
   topic: string,
   level: string,
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  avoidTopics?: string[]
 ): Promise<{ data: VoyagerData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -163,7 +172,7 @@ export async function generateVoyagerContent(
 Student level: ${level} (CEFR).
 ${getAgeInstruction(ageSegment)}
 ${isRandom
-  ? 'Pick ONE topic from the curated age-appropriate list above and imagine a vivid, concrete scene that brings it to life visually.'
+  ? `Pick ONE topic from the curated age-appropriate list above and imagine a vivid, concrete scene that brings it to life visually.${buildAvoidClause(avoidTopics)}`
   : `Topic: "${topic}".`
 }
 
@@ -306,7 +315,8 @@ export async function generateQuestContent(
   sessionId: string,
   topic: string,
   level: string,
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  avoidTopics?: string[]
 ): Promise<{ data: QuestData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -316,7 +326,7 @@ export async function generateQuestContent(
 Student level: ${level} (CEFR).
 ${getAgeInstruction(ageSegment)}
 ${isRandom
-  ? 'Pick ONE topic from the curated age-appropriate list above and build a roleplay scenario around it.'
+  ? `Pick ONE topic from the curated age-appropriate list above and build a roleplay scenario around it.${buildAvoidClause(avoidTopics)}`
   : `Context/topic: "${topic}".`
 }
 
@@ -386,7 +396,8 @@ export async function generateTimeTravelContent(
   topic?: string,
   tenses?: string[],
   ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
-  count: number = 15
+  count: number = 15,
+  avoidTopics?: string[]
 ): Promise<{ data: TimeTravelData; chosenTopic: string }> {
   const genAI = getGenAI();
   const n = Math.max(1, Math.min(15, count));
@@ -398,7 +409,7 @@ export async function generateTimeTravelContent(
 
   const topicConstraint = topic
     ? `All sentences must relate to this topic or scenario: "${topic}".`
-    : 'Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".';
+    : `Pick ONE topic from the curated age-appropriate list above for all sentences and report it in "chosen_topic".${buildAvoidClause(avoidTopics)}`;
 
   const specialStructureInstructions = TT_SPECIAL_STRUCTURE_INSTRUCTIONS;
 
@@ -611,7 +622,8 @@ export async function generateDictationContent(
   sessionId: string,
   topic: string,
   level: string,
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  avoidTopics?: string[]
 ): Promise<{ data: { sentence_en: string; sentence_ro: string; hint_ro: string; topic: string } }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -622,7 +634,7 @@ Student level: ${level} (CEFR).
 ${getAgeInstruction(ageSegment)}
 
 Generate ONE clear English sentence suitable for dictation at the student's level.
-${isRandom ? 'Pick ONE topic from the curated age-appropriate list above.' : `Topic: "${topic}".`}
+${isRandom ? `Pick ONE topic from the curated age-appropriate list above.${buildAvoidClause(avoidTopics)}` : `Topic: "${topic}".`}
 
 Rules:
 - sentence_en: 8–15 words, natural and clear (no contractions at A1/A2), ends with correct punctuation
@@ -690,7 +702,8 @@ export async function generateWritingPrompt(
   sessionId: string,
   topic: string,
   level: string,
-  ageSegment: 'child' | 'teenager' | 'adult' = 'adult'
+  ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
+  avoidTopics?: string[]
 ): Promise<{ data: WritingData; chosenTopic: string }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
@@ -716,7 +729,7 @@ Return ONLY valid JSON (no markdown):
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
   const contentPrompt = isRandom
-    ? 'Create a writing prompt — choose a suitable topic'
+    ? `Create a writing prompt — choose a suitable topic from the curated list.${buildAvoidClause(avoidTopics)}`
     : `Create a writing prompt about: "${topic}"`;
   const result = await model.generateContent(contentPrompt);
   const text = result.response.text();

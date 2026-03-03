@@ -58,6 +58,7 @@ import { roomCodeToSessionId, generateRoomCode, isValidRoomCode } from '@/lib/ro
 import { playSuccessSound, playWrongSound, setSoundMuted } from '@/lib/sound';
 import { FormattedLabel } from '@/components/FormattedLabel';
 import { filterUncommonWords } from '@/lib/commonWords';
+import { AGE_TOPICS } from '@/lib/ageTopics';
 import { ErrorBoundary } from '@/components/ErrorBoundary';
 import { TimeTravelView, StudentTimeTravelAnswers } from '@/components/features/TimeTravel';
 import {
@@ -1697,6 +1698,7 @@ function PuzzleView({
   showTranslation: boolean;
 }) {
   const [topic, setTopic] = useState('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -1759,9 +1761,16 @@ function PuzzleView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generatePuzzleContent(sessionId, topic.trim(), student.level, student.age_segment);
+      const isRandom = !topic.trim();
+      const { data, chosenTopic } = await generatePuzzleContent(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       onPuzzleGenerated(data);
-      setTopic(topic.trim() ? '' : chosenTopic);
+      setTopic('');
+      if (isRandom) {
+        setUsedTopics(prev => {
+          const next = [...prev, chosenTopic];
+          return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare necunoscută. Încearcă din nou.');
     }
@@ -2114,6 +2123,7 @@ function VoyagerView({
   cachedImageUrl?: string | null;
 }) {
   const [topic, setTopic] = useState('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2146,9 +2156,16 @@ function VoyagerView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generateVoyagerContent(sessionId, topic.trim(), student.level, student.age_segment);
+      const isRandom = !topic.trim();
+      const { data, chosenTopic } = await generateVoyagerContent(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       onVoyagerGenerated(data);
-      setTopic(topic.trim() ? '' : chosenTopic);
+      setTopic('');
+      if (isRandom) {
+        setUsedTopics(prev => {
+          const next = [...prev, chosenTopic];
+          return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
@@ -2380,6 +2397,7 @@ function ArenaView({
   studentBoosterProgress?: string[] | null;
 }) {
   const [topic, setTopic] = useState('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2399,9 +2417,16 @@ function ArenaView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data, chosenTopic } = await generateQuestContent(sessionId, topic.trim(), student.level, student.age_segment);
+      const isRandom = !topic.trim();
+      const { data, chosenTopic } = await generateQuestContent(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       onQuestGenerated(data);
-      setTopic(topic.trim() ? '' : chosenTopic);
+      setTopic('');
+      if (isRandom) {
+        setUsedTopics(prev => {
+          const next = [...prev, chosenTopic];
+          return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
@@ -2606,6 +2631,7 @@ function DictationView({
   studentDictationDraft?: string | null;
 }) {
   const [topic, setTopic] = useState('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2624,9 +2650,16 @@ function DictationView({
     setIsGenerating(true);
     setGenError('');
     try {
-      const { data } = await generateDictationContent(sessionId, topic.trim(), student.level, student.age_segment);
+      const isRandom = !topic.trim();
+      const { data } = await generateDictationContent(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       onDictationGenerated(data);
-      setTopic(topic.trim() ? '' : data.topic);
+      setTopic('');
+      if (isRandom && data.topic) {
+        setUsedTopics(prev => {
+          const next = [...prev, data.topic];
+          return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
@@ -2874,6 +2907,7 @@ function WritingView({
   studentWritingDraft?: string | null;
 }) {
   const [topic, setTopic] = useState('');
+  const [usedTopics, setUsedTopics] = useState<string[]>([]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2893,8 +2927,15 @@ function WritingView({
     setIsGenerating(true);
     setGenError('');
     try {
-      await generateWritingPrompt(sessionId, topic.trim(), student.level, student.age_segment);
+      const isRandom = !topic.trim();
+      const { chosenTopic } = await generateWritingPrompt(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       setTopic('');
+      if (isRandom) {
+        setUsedTopics(prev => {
+          const next = [...prev, chosenTopic];
+          return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
+        });
+      }
     } catch (e) {
       setGenError(e instanceof Error ? e.message : 'Eroare la generare. Încearcă din nou.');
     }
