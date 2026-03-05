@@ -1708,6 +1708,7 @@ function PuzzleView({
   const [isCorrect, setIsCorrect] = useState(false);
   const [isWrong, setIsWrong] = useState(false);
   const [xpAwarded, setXpAwarded] = useState(false);
+  const [lastChosenTopic, setLastChosenTopic] = useState('');
   const progressSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const puzzleCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -1772,6 +1773,7 @@ function PuzzleView({
       onPuzzleGenerated(data);
       setTopic('');
       if (isRandom) {
+        setLastChosenTopic(chosenTopic);
         setUsedTopics(prev => {
           const next = [...prev, chosenTopic];
           return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
@@ -1878,6 +1880,12 @@ function PuzzleView({
             <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl px-4 py-2.5">
               <AlertCircle size={13} className="shrink-0" />
               <span className="text-xs font-bold">{genError}</span>
+            </div>
+          )}
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-purple-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-purple-500">{lastChosenTopic}</span></span>
             </div>
           )}
         </div>
@@ -2140,6 +2148,7 @@ function VoyagerView({
   // Dacă avem deja un URL (din DB sau cache), nu pornim cu spinner
   const [imageLoading, setImageLoading] = useState(!voyagerData?.image_url && !cachedImageUrl);
   const [imageError, setImageError] = useState(false);
+  const [lastChosenTopic, setLastChosenTopic] = useState('');
   const voyagerCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref pentru a nu reseta imageLoading la primul mount (când imaginea există deja)
   const isFirstRender = useRef(true);
@@ -2173,6 +2182,7 @@ function VoyagerView({
       onVoyagerGenerated(data);
       setTopic('');
       if (isRandom) {
+        setLastChosenTopic(chosenTopic);
         setUsedTopics(prev => {
           const next = [...prev, chosenTopic];
           return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
@@ -2263,6 +2273,12 @@ function VoyagerView({
             <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl px-4 py-2.5">
               <AlertCircle size={13} className="shrink-0" />
               <span className="text-xs font-bold">{genError}</span>
+            </div>
+          )}
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-pink-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-pink-500">{lastChosenTopic}</span></span>
             </div>
           )}
         </div>
@@ -2417,6 +2433,7 @@ function ArenaView({
   const [genError, setGenError] = useState('');
   // Stare locală optimistă — doar profesorul actualizează
   const [localClaimed, setLocalClaimed] = useState<string[]>([]);
+  const [lastChosenTopic, setLastChosenTopic] = useState('');
   const arenaCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -2440,6 +2457,7 @@ function ArenaView({
       onQuestGenerated(data);
       setTopic('');
       if (isRandom) {
+        setLastChosenTopic(chosenTopic);
         setUsedTopics(prev => {
           const next = [...prev, chosenTopic];
           return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
@@ -2530,6 +2548,12 @@ function ArenaView({
             <div className="flex items-center gap-2 bg-rose-50 border border-rose-100 text-rose-600 rounded-xl px-4 py-2.5">
               <AlertCircle size={13} className="shrink-0" />
               <span className="text-xs font-bold">{genError}</span>
+            </div>
+          )}
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-emerald-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-emerald-500">{lastChosenTopic}</span></span>
             </div>
           )}
         </div>
@@ -2657,6 +2681,7 @@ function DictationView({
   const [genError, setGenError] = useState('');
   const [studentText, setStudentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastChosenTopic, setLastChosenTopic] = useState('');
   const dictationCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -2679,6 +2704,7 @@ function DictationView({
       onDictationGenerated(data);
       setTopic('');
       if (isRandom && data.topic) {
+        setLastChosenTopic(data.topic);
         setUsedTopics(prev => {
           const next = [...prev, data.topic];
           return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
@@ -2783,6 +2809,12 @@ function DictationView({
             )}
           </div>
           {genError && <p className="text-rose-500 text-xs font-bold">{genError}</p>}
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-orange-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-orange-500">{lastChosenTopic}</span></span>
+            </div>
+          )}
 
           {/* Sentence — TEACHER ONLY */}
           {dictationData && (
@@ -2947,6 +2979,7 @@ function WritingView({
   const [studentText, setStudentText] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showExample, setShowExample] = useState(false);
+  const [lastChosenTopic, setLastChosenTopic] = useState('');
   const writingCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -2968,6 +3001,7 @@ function WritingView({
       const { chosenTopic } = await generateWritingPrompt(sessionId, topic.trim(), student.level, student.age_segment, isRandom && usedTopics.length > 0 ? usedTopics : undefined);
       setTopic('');
       if (isRandom) {
+        setLastChosenTopic(chosenTopic);
         setUsedTopics(prev => {
           const next = [...prev, chosenTopic];
           return next.length >= AGE_TOPICS[student.age_segment].length ? [] : next;
@@ -3062,6 +3096,12 @@ function WritingView({
             )}
           </div>
           {genError && <p className="text-rose-500 text-xs font-bold">{genError}</p>}
+          {lastChosenTopic && !genError && (
+            <div className="flex items-center gap-2 text-slate-400">
+              <Shuffle size={11} className="shrink-0 text-violet-400" />
+              <span className="text-[11px] font-bold">Temă aleasă: <span className="text-violet-500">{lastChosenTopic}</span></span>
+            </div>
+          )}
 
           {/* Prompt + exemplu — TEACHER ONLY */}
           {writingData && (
