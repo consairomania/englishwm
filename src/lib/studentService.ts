@@ -66,15 +66,17 @@ export async function updateStudentDetails(
   return true;
 }
 
-// ─── Actualizează XP și skills după o sesiune ─────────────────────────────────
+// ─── Actualizează skills după o sesiune ───────────────────────────────────────
+// IMPORTANT: XP-ul NU se salvează în DB — e per-sesiune.
+// Nivelul CEFR (level) se schimbă EXCLUSIV de profesor via updateStudentDetails.
 export async function updateStudentProgress(
   id: string,
-  xp: number,
+  _xp: number,
   skills: Student['skills']
 ): Promise<boolean> {
   const { error } = await supabase
     .from('students')
-    .update({ xp, skills })
+    .update({ skills })
     .eq('id', id);
 
   if (error) {

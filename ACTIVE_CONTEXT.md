@@ -50,6 +50,28 @@ Data: 2026-03-01
 - Format vechi flat (`puzzle_data`, `time_travel_data` etc.): backward compat
 - Ambele formate suportate în useEffect init, handleSubmit, și render
 
+## Protecții nivel CEFR + Persistență teme random (2026-03-05)
+
+### Problema 1 — Nivel CEFR protejat
+- `updateStudentProgress` în `src/lib/studentService.ts` NU mai salvează XP în DB (parametru redenumit `_xp`, update trimite doar `{ skills }`). XP este per-sesiune.
+- Codul JS nu a schimbat niciodată `student.level` (CEFR) automat. Cauza probabilă a schimbărilor observate: **trigger PostgreSQL în Supabase** care mapa XP→level.
+- **ACȚIUNE MANUALĂ NECESARĂ**: mergi în Supabase Dashboard → Database → Triggers și verifică dacă există un trigger pe tabela `students` care actualizează `level` bazat pe `xp`. Dacă există, șterge-l.
+- SQL diagnostic de rulat în Supabase SQL Editor:
+  ```sql
+  SELECT trigger_name, event_manipulation, action_statement
+  FROM information_schema.triggers
+  WHERE event_object_table = 'students';
+  -- Dacă găsești un trigger care schimbă level, drop-uiește-l:
+  -- DROP TRIGGER IF EXISTS <trigger_name> ON students;
+  -- DROP FUNCTION IF EXISTS <function_name>();
+  ```
+
+### Problema 2 — Teme random persistente per elev
+- `usedTopics` state în fiecare modul (Puzzle, Voyager, Quest, Dictation, Writing) este acum persistat în `localStorage`.
+- Cheile folosite: `ewm_used_topics_{modul}_{student.dbId}`
+- Inițializare lazy din localStorage la mount + useEffect care salvează la fiecare schimbare
+- Reset automat la [] când toate temele au fost parcurse (comportament existent păstrat)
+
 ## Time Travel — Îmbunătățiri recente
 - **Selector nr. exerciții**: profesorul poate alege 1–15 exerciții via input numeric (default 15); valoarea e transmisă la `generateTimeTravelContent(... count)` → prompt-ul Gemini generează exact N exerciții.
 - **Regenerare item individual**: buton mic `RefreshCw` pe fiecare card (vizibil doar profesor) → `handleRegenerateItem(idx)` → `regenerateTimeTravelItem(sessionId, idx, ...)` în `gemini.ts` → înlocuiește itemul la indexul dat fără a afecta celelalte.

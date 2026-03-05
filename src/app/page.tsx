@@ -1698,7 +1698,9 @@ function PuzzleView({
   showTranslation: boolean;
 }) {
   const [topic, setTopic] = useState('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_puzzle_${student.dbId}`) ?? '[]'); } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -1708,6 +1710,10 @@ function PuzzleView({
   const [xpAwarded, setXpAwarded] = useState(false);
   const progressSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const puzzleCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(`ewm_used_topics_puzzle_${student.dbId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, student.dbId]);
 
   // Reset sau restaurare când se schimbă puzzle-ul (sau la mount după refresh)
   useEffect(() => {
@@ -2123,7 +2129,9 @@ function VoyagerView({
   cachedImageUrl?: string | null;
 }) {
   const [topic, setTopic] = useState('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_voyager_${student.dbId}`) ?? '[]'); } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2135,6 +2143,10 @@ function VoyagerView({
   const voyagerCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref pentru a nu reseta imageLoading la primul mount (când imaginea există deja)
   const isFirstRender = useRef(true);
+
+  useEffect(() => {
+    try { localStorage.setItem(`ewm_used_topics_voyager_${student.dbId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, student.dbId]);
 
   useEffect(() => {
     if (isFirstRender.current) {
@@ -2397,13 +2409,19 @@ function ArenaView({
   studentBoosterProgress?: string[] | null;
 }) {
   const [topic, setTopic] = useState('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_quest_${student.dbId}`) ?? '[]'); } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
   // Stare locală optimistă — doar profesorul actualizează
   const [localClaimed, setLocalClaimed] = useState<string[]>([]);
   const arenaCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(`ewm_used_topics_quest_${student.dbId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, student.dbId]);
 
   useEffect(() => {
     setLocalClaimed([]);
@@ -2631,7 +2649,9 @@ function DictationView({
   studentDictationDraft?: string | null;
 }) {
   const [topic, setTopic] = useState('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_dictation_${student.dbId}`) ?? '[]'); } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2639,6 +2659,10 @@ function DictationView({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const dictationCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(`ewm_used_topics_dictation_${student.dbId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, student.dbId]);
 
   // Reset student text when new dictation is generated
   useEffect(() => {
@@ -2914,7 +2938,9 @@ function WritingView({
   studentWritingDraft?: string | null;
 }) {
   const [topic, setTopic] = useState('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_writing_${student.dbId}`) ?? '[]'); } catch { return []; }
+  });
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [genError, setGenError] = useState('');
@@ -2923,6 +2949,10 @@ function WritingView({
   const [showExample, setShowExample] = useState(false);
   const writingCooldownRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftSyncRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    try { localStorage.setItem(`ewm_used_topics_writing_${student.dbId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, student.dbId]);
 
   useEffect(() => {
     setStudentText('');
