@@ -59,9 +59,13 @@ export const TimeTravelSchema = z.object({
 });
 
 // ─── Dictation ────────────────────────────────────────────────────────────────
-export const DictationSchema = z.object({
+export const DictationSentenceSchema = z.object({
   sentence_en: z.string().min(1),
   sentence_ro: z.string().min(1),
+});
+
+export const DictationSchema = z.object({
+  sentences: z.array(DictationSentenceSchema).min(1).max(8),
   hint_ro: z.string().min(1),
   topic: z.string().optional(),
 });

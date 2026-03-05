@@ -624,7 +624,7 @@ export async function generateDictationContent(
   level: string,
   ageSegment: 'child' | 'teenager' | 'adult' = 'adult',
   avoidTopics?: string[]
-): Promise<{ data: { sentence_en: string; sentence_ro: string; hint_ro: string; topic: string } }> {
+): Promise<{ data: { sentences: { sentence_en: string; sentence_ro: string }[]; hint_ro: string; topic: string } }> {
   const isRandom = !topic.trim();
   const genAI = getGenAI();
   const model = genAI.getGenerativeModel({
@@ -633,23 +633,23 @@ export async function generateDictationContent(
 Student level: ${level} (CEFR).
 ${getAgeInstruction(ageSegment)}
 
-Generate ONE clear English sentence suitable for dictation at the student's level.
+Generate exactly 4-5 clear English sentences suitable for dictation at the student's level. They should form a short coherent passage on the same topic.
 ${isRandom ? `Pick ONE topic from the curated age-appropriate list above.${buildAvoidClause(avoidTopics)}` : `Topic: "${topic}".`}
 
 Rules:
-- sentence_en: 8–15 words, natural and clear (no contractions at A1/A2), ends with correct punctuation
-- sentence_ro: accurate natural Romanian translation
-- hint_ro: a short Romanian hint about the topic/context (NOT a translation), 5–8 words
+- Each sentence_en: 8–15 words, natural and clear (no contractions at A1/A2), ends with correct punctuation
+- Each sentence_ro: accurate natural Romanian translation of that sentence
+- hint_ro: a short Romanian hint about the overall topic/context (NOT a translation), 5–8 words
 - topic: short English label for the topic (2–4 words)
 
 Return ONLY valid JSON (no markdown):
-{ "sentence_en": "...", "sentence_ro": "...", "hint_ro": "...", "topic": "..." }`,
+{ "sentences": [{ "sentence_en": "...", "sentence_ro": "..." }, ...], "hint_ro": "...", "topic": "..." }`,
     generationConfig: { responseMimeType: 'application/json', temperature: 0.8 },
   } as Parameters<typeof genAI.getGenerativeModel>[0]);
 
   const contentPrompt = isRandom
-    ? 'Create a dictation sentence — choose a suitable topic'
-    : `Create dictation sentence about: "${topic}"`;
+    ? 'Create a dictation passage — choose a suitable topic'
+    : `Create dictation passage about: "${topic}"`;
   const result = await model.generateContent(contentPrompt);
   const text = result.response.text();
   const parsedD = DictationSchema.safeParse(JSON.parse(text));

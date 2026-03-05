@@ -735,10 +735,10 @@ function TeacherHome({
                               <p className="text-[10px] text-slate-500 italic">„{(ex.puzzle_data as Record<string,unknown>).sentence as string}"</p>
                             </div>
                           )}
-                          {!!(ex.dictation_data && (ex.dictation_data as Record<string,unknown>).sentence_en) && (
+                          {!!(ex.dictation_data && ((ex.dictation_data as Record<string,unknown>).sentence_en || (ex.dictation_data as Record<string,unknown>).sentences)) && (
                             <div className="space-y-1">
                               <p className="text-[10px] font-black text-rose-600">🎙️ Dictation</p>
-                              <p className="text-[10px] text-slate-500 italic">„{(ex.dictation_data as Record<string,unknown>).sentence_en as string}"</p>
+                              <p className="text-[10px] text-slate-500 italic">„{(Array.isArray((ex.dictation_data as Record<string,unknown>).sentences) ? ((ex.dictation_data as Record<string,unknown>).sentences as {sentence_en:string}[])[0]?.sentence_en : (ex.dictation_data as Record<string,unknown>).sentence_en as string) ?? ''}..."</p>
                             </div>
                           )}
                           {!!(ex.writing_data && (ex.writing_data as Record<string,unknown>).prompt_en) && (
@@ -2643,7 +2643,7 @@ function DictationView({
   // Reset student text when new dictation is generated
   useEffect(() => {
     setStudentText('');
-  }, [dictationData?.sentence_en]);
+  }, [dictationData?.sentences?.[0]?.sentence_en]);
 
   const handleGenerate = async () => {
     if (isGenerating || isCoolingDown) return;
@@ -2678,7 +2678,8 @@ function DictationView({
     if (!studentText.trim() || !dictationData || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      const result = await evaluateDictationAnswer(dictationData.sentence_en, studentText.trim());
+      const originalText = dictationData.sentences.map(s => s.sentence_en).join(' ');
+      const result = await evaluateDictationAnswer(originalText, studentText.trim());
       const answer: StudentDictationAnswer = {
         text: studentText.trim(),
         ...result,
@@ -2766,8 +2767,14 @@ function DictationView({
                 <span className="text-[9px] font-black text-pink-600 bg-pink-100 px-2 py-0.5 rounded-full uppercase tracking-widest">TEACHER ONLY</span>
                 <span className="text-[10px] text-slate-400 italic">Citește cu voce tare</span>
               </div>
-              <p className="text-xl font-black text-slate-800">{dictationData.sentence_en}</p>
-              <p className="text-sm text-slate-500 italic">{dictationData.sentence_ro}</p>
+              <div className="space-y-3">
+                {dictationData.sentences.map((s, i) => (
+                  <div key={i} className="space-y-0.5">
+                    <p className="text-base font-black text-slate-800">{i + 1}. {s.sentence_en}</p>
+                    <p className="text-xs text-slate-500 italic pl-4">{s.sentence_ro}</p>
+                  </div>
+                ))}
+              </div>
               <p className="text-[10px] text-pink-500 font-bold">Indiciu RO: {dictationData.hint_ro}</p>
             </div>
           )}
@@ -2845,10 +2852,10 @@ function DictationView({
                 <p className="text-[10px] font-black text-violet-500 uppercase tracking-widest mb-1">Indiciu</p>
                 <p className="text-sm font-bold text-slate-700 italic">{dictationData.hint_ro}</p>
               </div>
-              <p className="text-sm text-slate-600 text-center font-bold">Scrie ce auzi:</p>
+              <p className="text-sm text-slate-600 text-center font-bold">Scrie toate propozițiile dictate:</p>
               <textarea
                 className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 outline-none font-bold text-slate-800 text-sm resize-none focus:border-pink-400 transition-colors"
-                rows={4}
+                rows={6}
                 value={studentText}
                 onChange={e => {
                   const val = e.target.value;
@@ -2868,7 +2875,7 @@ function DictationView({
                       .eq('session_id', sessionId);
                   }, 500);
                 }}
-                placeholder="Scrie propoziția dictată..."
+                placeholder="Scrie propozițiile dictate..."
                 disabled={isSubmitting}
               />
               <button
@@ -3310,6 +3317,12 @@ function HomeworkReviewOverlay({
   // Format nou: exercises.items este un array de DraftHomeworkItem
   if (Array.isArray(ex.items)) {
     let ttOffset = 0;
+    let puzzleIdx = 0;
+    let dictIdx = 0;
+    let writingIdx = 0;
+    const puzzleAnswersArr = Array.isArray(sa.puzzle_answers) ? (sa.puzzle_answers as { answer: string; correct: boolean }[]) : null;
+    const dictAnswersArr = Array.isArray(sa.dictation_answers) ? (sa.dictation_answers as { answer: string; feedback: DictFeedback | null }[]) : null;
+    const writingAnswersArr = Array.isArray(sa.writing_answers) ? (sa.writing_answers as { answer: string; feedback: WritingFb | null }[]) : null;
     const items = ex.items as DraftHomeworkItem[];
     items.forEach((item, idx) => {
       const d = item.data as Record<string, unknown>;
@@ -3322,8 +3335,10 @@ function HomeworkReviewOverlay({
           content: renderTTItems(ttItems, localOffset),
         });
       } else if (item.type === 'puzzle' && d.sentence) {
-        const stuAns = sa.puzzle_answer as string | undefined;
-        const stuCorrect = sa.puzzle_correct as boolean | undefined;
+        const pAns = puzzleAnswersArr?.[puzzleIdx];
+        puzzleIdx++;
+        const stuAns = pAns?.answer;
+        const stuCorrect = pAns?.correct;
         sections.push({
           key: `puzzle_${idx}`, label: item.label, icon: '🧩',
           content: (
@@ -3342,20 +3357,25 @@ function HomeworkReviewOverlay({
             </div>
           ),
         });
-      } else if (item.type === 'dictation' && d.sentence_en) {
-        const stuAns = sa.dictation_answer as string | undefined;
-        const stuFb = (sa.dictation_feedback ?? null) as DictFeedback | null;
+      } else if (item.type === 'dictation' && (d.sentences || d.sentence_en)) {
+        const dAns = dictAnswersArr?.[dictIdx];
+        dictIdx++;
+        const stuAns = dAns?.answer;
+        const stuFb = dAns?.feedback ?? null;
         const scoreVal = stuFb?.score;
+        const dictSentences = Array.isArray(d.sentences)
+          ? (d.sentences as { sentence_en: string; sentence_ro: string }[])
+          : [{ sentence_en: d.sentence_en as string, sentence_ro: d.sentence_ro as string }];
         sections.push({
           key: `dict_${idx}`, label: item.label, icon: '🎙️',
           content: (
             <div className="space-y-2">
-              {!!d.sentence_ro && <>
-                <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Propoziție în română</p>
-                <p className="text-sm font-black text-white">{d.sentence_ro as string}</p>
-              </>}
-              <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mt-1">Răspuns corect (engleză)</p>
-              <p className="text-sm font-black text-emerald-200">{d.sentence_en as string}</p>
+              {dictSentences.map((s, si) => (
+                <div key={si} className="space-y-0.5">
+                  <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">{si + 1}. {s.sentence_ro}</p>
+                  <p className="text-sm font-black text-emerald-200">{s.sentence_en}</p>
+                </div>
+              ))}
               {!!d.hint_ro && <p className="text-[10px] text-amber-300">💡 {d.hint_ro as string}</p>}
               {completed && stuAns !== undefined
                 ? studentBox(
@@ -3374,8 +3394,10 @@ function HomeworkReviewOverlay({
           ),
         });
       } else if (item.type === 'writing' && d.prompt_en) {
-        const stuAns = sa.writing_answer as string | undefined;
-        const stuFb = (sa.writing_feedback ?? null) as WritingFb | null;
+        const wAns = writingAnswersArr?.[writingIdx];
+        writingIdx++;
+        const stuAns = wAns?.answer;
+        const stuFb = wAns?.feedback ?? null;
         sections.push({
           key: `writing_${idx}`, label: item.label, icon: '✍️',
           content: (
@@ -3447,21 +3469,24 @@ function HomeworkReviewOverlay({
         ),
       });
     }
-    if (ex.dictation_data && (ex.dictation_data as Record<string, unknown>).sentence_en) {
+    if (ex.dictation_data && ((ex.dictation_data as Record<string, unknown>).sentence_en || (ex.dictation_data as Record<string, unknown>).sentences)) {
       const d = ex.dictation_data as Record<string, unknown>;
       const stuAns = sa.dictation_answer as string | undefined;
       const stuFb = (sa.dictation_feedback ?? null) as DictFeedback | null;
       const scoreVal = stuFb?.score;
+      const dictSentences = Array.isArray(d.sentences)
+        ? (d.sentences as { sentence_en: string; sentence_ro: string }[])
+        : [{ sentence_en: d.sentence_en as string, sentence_ro: d.sentence_ro as string }];
       sections.push({
         key: 'dictation', label: 'Dictare', icon: '🎙️',
         content: (
           <div className="space-y-2">
-            {!!d.sentence_ro && <>
-              <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">Propoziție în română</p>
-              <p className="text-sm font-black text-white">{d.sentence_ro as string}</p>
-            </>}
-            <p className="text-[9px] font-black text-white/40 uppercase tracking-widest mt-1">Răspuns corect (engleză)</p>
-            <p className="text-sm font-black text-emerald-200">{d.sentence_en as string}</p>
+            {dictSentences.map((s, si) => (
+              <div key={si} className="space-y-0.5">
+                <p className="text-[9px] font-black text-white/40 uppercase tracking-widest">{si + 1}. {s.sentence_ro}</p>
+                <p className="text-sm font-black text-emerald-200">{s.sentence_en}</p>
+              </div>
+            ))}
             {!!d.hint_ro && <p className="text-[10px] text-amber-300">💡 {d.hint_ro as string}</p>}
             {completed && stuAns !== undefined
               ? studentBox(

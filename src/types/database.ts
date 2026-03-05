@@ -87,9 +87,13 @@ export type TimeTravelItem = {
 
 export type TimeTravelData = TimeTravelItem[];
 
-export type DictationData = {
+export type DictationSentence = {
   sentence_en: string;
   sentence_ro: string;
+};
+
+export type DictationData = {
+  sentences: DictationSentence[];
   hint_ro: string;
   topic: string;
 };
