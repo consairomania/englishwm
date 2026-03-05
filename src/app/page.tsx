@@ -5007,6 +5007,7 @@ export default function DashboardPage() {
             studentLevel={student.level}
             ageSegment={student.age_segment ?? 'adult'}
             sessionId={sessionId}
+            studentId={student.dbId}
             timeTravelData={timeTravelData}
             isTeacher={isTeacher}
             onBack={isTeacher ? () => changeView('dashboard') : undefined}

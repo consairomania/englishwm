@@ -147,6 +147,7 @@ type TimeTravelViewProps = {
   studentLevel: string;
   ageSegment?: 'child' | 'teenager' | 'adult';
   sessionId: string;
+  studentId?: string;
   timeTravelData: TimeTravelData | null;
   isTeacher: boolean;
   onBack?: () => void;
@@ -159,6 +160,7 @@ export function TimeTravelView({
   studentLevel,
   ageSegment = 'adult',
   sessionId,
+  studentId,
   timeTravelData,
   isTeacher,
   onBack,
@@ -187,7 +189,15 @@ export function TimeTravelView({
   const [isCoolingDown, setIsCoolingDown] = useState(false);
   const [regeneratingIdx, setRegeneratingIdx] = useState<number | null>(null);
   const [lastChosenTopic, setLastChosenTopic] = useState<string>('');
-  const [usedTopics, setUsedTopics] = useState<string[]>([]);
+  const [usedTopics, setUsedTopics] = useState<string[]>(() => {
+    if (!studentId) return [];
+    try { return JSON.parse(localStorage.getItem(`ewm_used_topics_timetravel_${studentId}`) ?? '[]'); } catch { return []; }
+  });
+
+  useEffect(() => {
+    if (!studentId) return;
+    try { localStorage.setItem(`ewm_used_topics_timetravel_${studentId}`, JSON.stringify(usedTopics)); } catch {}
+  }, [usedTopics, studentId]);
 
   // Ref pentru click-outside pe dropdown
   const dropdownRef = useRef<HTMLDivElement>(null);
