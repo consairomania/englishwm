@@ -248,7 +248,7 @@ function DictationSection({
       <div className="p-5 space-y-3">
         <div className="bg-orange-50 border border-orange-100 rounded-xl p-4 space-y-1">
           <p className="text-[9px] font-black text-orange-500 uppercase tracking-widest">Traduce în engleză:</p>
-          <p className="text-base font-black text-slate-800">{dictation.sentence_ro}</p>
+          <p className="text-base font-black text-slate-800">{dictation.sentences[0]?.sentence_ro}</p>
           <p className="text-xs text-slate-500 italic">Indiciu: {dictation.hint_ro}</p>
         </div>
         <textarea
@@ -539,7 +539,7 @@ export default function HomeworkExercisePage() {
           const text = (dictTexts[i] ?? '').trim();
           if (text) {
             try {
-              const fb = await evaluateDictationAnswer(dd.sentence_en, text);
+              const fb = await evaluateDictationAnswer(dd.sentences[0]?.sentence_en ?? '', text);
               setDictFeedbacks((prev) => ({ ...prev, [i]: fb }));
               total += 1;
               if (fb.score === 'exact') { correct += 1; xp += 150; }
@@ -605,7 +605,7 @@ export default function HomeworkExercisePage() {
         const text = (dictTexts[0] ?? '').trim();
         if (text) {
           try {
-            const fb = await evaluateDictationAnswer(dd.sentence_en, text);
+            const fb = await evaluateDictationAnswer(dd.sentences[0]?.sentence_en ?? '', text);
             setDictFeedbacks((prev) => ({ ...prev, 0: fb }));
             answers.dictation_answer = text;
             answers.dictation_feedback = fb;
